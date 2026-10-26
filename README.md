@@ -46,7 +46,7 @@ O sistema é dividido nos seguintes módulos principais da Fase IV:
 - **SQLModel / SQLAlchemy**: ORM declarativo para modelagem e persistência.
 - **PyMySQL**: Conector MySQL.
 - **Pydantic v2**: Validação estrita de esquemas e tipos de dados.
-- **HTTPX / Requests**: Cliente HTTP para comunicação com a API do TCESP.
+- **Requests**: Cliente HTTP para comunicação com a API do TCESP.
 - **jsonschema**: Validação de conformidade contra os esquemas JSON oficiais da Fase IV.
 
 ### Frontend
