@@ -1,0 +1,9 @@
+venv
+env/
+tmp/
+.venv
+.vscode
+*.log
+**/__pycache__
+**.tar.gz
+.env

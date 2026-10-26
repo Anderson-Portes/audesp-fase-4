@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Empenho",
+  "description": "JSON schema para o envio de empenhos de contrato.",
+  "type": "object",
+  "properties": {
+    "descritor": {
+      "type": "object",
+      "properties": {
+        "municipio": {
+          "$id": "#root/descritor/municipio",
+          "title": "Municipio",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9999
+        },
+        "entidade": {
+          "$id": "#root/descritor/entidade",
+          "title": "Entidade",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 99999
+        },
+        "numeroEmpenho": {
+          "description": "Número do empenho",
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,34}$",
+          "maxLength": 35,
+          "minLength": 1
+        },
+        "anoEmpenho": {
+          "title": "Ano do empenho",
+          "type": "integer",
+          "minimum": 1950,
+          "maximum": 2100
+        },
+        "retificacao": {
+          "title": "Identifica se o documento é uma retificação; true - Retificação; false - Não é retificação",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "municipio",
+        "entidade",
+		"numeroEmpenho",
+		"anoEmpenho",
+        "retificacao"
+      ],
+      "additionalProperties": false
+    },
+    "codigoContrato": {
+      "$id": "#root/codigoContrato",
+      "title": "Código único que identifica o ajuste (contrato)",
+      "type": "string",
+      "maxLength": 25
+    },
+    "dataEmissaoEmpenho": {
+      "title": "Informar a data da emissão do empenho",
+      "type": "string",
+      "format": "date"
+    },
+    "valorTotal": {
+      "$id": "#root/valorTotal",
+      "title": "Valor total do Empenho",
+      "type": "number",
+      "multipleOf": 0.0001
+    },
+    "tipoPessoa": {
+      "$id": "#root/tipoPessoa",
+      "title": "PJ-Pessoa Jurídica PF-Pessoa Física PE-Estrangeiro",
+      "type": "string",
+      "enum": [
+        "PJ",
+        "PF",
+        "PE"
+      ]
+    },
+    "niCredorFornecedor": {
+      "$id": "#root/niCredorFornecedor",
+      "title": "Número de identificação do fornecedor contratado; CNPJ, CPF ou identificador de empresa estrangeira",
+      "type": "string",
+      "maxLength": 50
+    },
+    "nomeCredorFornecedor": {
+      "$id": "#root/nomeCredorFornecedor",
+      "title": "Nome do credor/fornecedor",
+      "type": "string",
+      "maxLength": 100
+    },
+    "codigoNaturezaDespesa": {
+      "$id": "#root/codigoNaturezaDespesa",
+      "title": "Classificação Econômica da Despesa até o nível de elemento",
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 8
+    },
+    "fonteRecurso": {
+      "$id": "#root/fonteRecurso",
+      "title": "Informa a Fonte de Recursos do empenho",
+      "type": "number",
+      "enum": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          91,
+          92,
+          93,
+          94,
+          95,
+          96,
+          97,
+          98,
+          99
+      ]      
+    }
+  },
+  "required": [
+    "descritor",
+    "codigoContrato",
+    "dataEmissaoEmpenho",
+    "valorTotal",
+    "tipoPessoa",
+    "niCredorFornecedor",
+	"nomeCredorFornecedor"
+  ],
+  "additionalProperties": false
+}

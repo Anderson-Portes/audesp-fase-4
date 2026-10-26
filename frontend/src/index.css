@@ -1,0 +1,148 @@
+@import 'bootstrap/dist/css/bootstrap.min.css';
+
+:root {
+  --primary-green: #00573D;
+  --secondary-green: #013e2c;
+  --sidebar-width: 250px;
+  --header-height: 60px;
+  --body-bg: #f5f6f8;
+}
+
+body {
+  background-color: var(--body-bg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+/* Sidebar Styling */
+.sidebar {
+  width: var(--sidebar-width);
+  height: 100vh;
+  position: fixed;
+  top: 0;
+  left: 0;
+  background-color: #ffffff;
+  border-right: 1px solid #e0e0e0;
+  overflow-y: auto;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar .brand {
+  height: var(--header-height);
+  display: flex;
+  align-items: center;
+  padding: 0 1rem;
+  font-weight: bold;
+  font-size: 1.25rem;
+  border-bottom: 1px solid #e0e0e0;
+  color: var(--primary-green);
+}
+
+.sidebar .nav-link {
+  color: #333;
+  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-weight: 500;
+}
+
+.sidebar .nav-link:hover, .sidebar .nav-link.active {
+  background-color: rgba(0, 87, 61, 0.05);
+  color: var(--primary-green);
+}
+
+.sidebar .nav-item .lucide {
+  width: 20px;
+  height: 20px;
+}
+
+/* Submenu */
+.sidebar .submenu {
+  padding-left: 2.5rem;
+  font-size: 0.9rem;
+}
+
+/* Header Styling */
+.top-header {
+  height: var(--header-height);
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: var(--sidebar-width);
+  background-color: #ffffff;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 1.5rem;
+  z-index: 999;
+}
+
+/* Main Content Styling */
+.main-content {
+  margin-left: var(--sidebar-width);
+  margin-top: var(--header-height);
+  padding: 1.5rem;
+  min-height: calc(100vh - var(--header-height));
+}
+
+.page-header {
+  background-color: var(--primary-green);
+  color: white;
+  padding: 0.75rem 1.5rem;
+  margin-bottom: 1.5rem;
+  border-radius: 4px;
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+
+/* Buttons */
+.btn-primary-green {
+  background-color: var(--primary-green);
+  color: white;
+  border: none;
+}
+
+.btn-primary-green:hover {
+  background-color: var(--secondary-green);
+  color: white;
+}
+
+.btn-secondary-light {
+  background-color: #dcdcdc;
+  color: #333;
+  border: none;
+}
+
+.btn-secondary-light:hover {
+  background-color: #c0c0c0;
+  color: #333;
+}
+
+/* Login Page specific */
+.login-container {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--body-bg);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+/* Form overrides */
+.form-control:focus {
+  border-color: var(--primary-green);
+  box-shadow: 0 0 0 0.25rem rgba(0, 87, 61, 0.25);
+}
