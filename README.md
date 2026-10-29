@@ -173,6 +173,32 @@ audesp-fase-4/
 
 ---
 
+### 3. Executando com Docker e Docker Compose
+
+Para subir toda a aplicação em contêineres:
+
+1. **Via Docker Compose (Frontend + Backend):**
+   ```bash
+   docker compose up --build -d
+   ```
+   - **Frontend (Nginx)**: `http://localhost:80`
+   - **Backend (FastAPI)**: `http://localhost:8000` (Swagger: `http://localhost:8000/docs`)
+
+2. **Build individual das imagens:**
+   - **Backend (`python:3.11-slim`)**:
+     ```bash
+     docker build -t audesp-backend ./backend
+     docker run -d -p 8000:8000 --env-file ./backend/.env --name audesp_backend audesp-backend
+     ```
+   - **Frontend (`nginx:alpine` multi-stage)**:
+     ```bash
+     docker build -t audesp-frontend ./frontend
+     docker run -d -p 80:80 --name audesp_frontend audesp-frontend
+     ```
+
+---
+
 ## 📄 Licença e Uso
 
 Este repositório destina-se à integração e transmissão de dados da administração pública junto ao Tribunal de Contas do Estado de São Paulo (TCESP) no âmbito da Nova Fase IV do AUDESP.
+

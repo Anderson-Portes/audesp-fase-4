@@ -1,6 +1,6 @@
 import json
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlmodel import Session, select, or_
@@ -164,7 +164,7 @@ class LicitacaoService:
             numero_processo=numero_processo,
             objeto_edital=objeto_edital,
             documento_json=json.dumps(doc_dict, ensure_ascii=False),
-            updated_at=datetime.utcnow()
+            updated_at=datetime.now(timezone.utc)
         )
         session.add(licitacao)
         session.commit()
@@ -214,7 +214,7 @@ class LicitacaoService:
         licitacao.recurso_bid = int(doc_dict.get("recursoBID", licitacao.recurso_bid))
         licitacao.tipo_natureza = int(doc_dict.get("tipoNatureza", licitacao.tipo_natureza))
         licitacao.documento_json = json.dumps(doc_dict, ensure_ascii=False)
-        licitacao.updated_at = datetime.utcnow()
+        licitacao.updated_at = datetime.now(timezone.utc)
 
         session.add(licitacao)
         session.commit()
@@ -248,6 +248,24 @@ class LicitacaoService:
 
         # Executa validações oficiais AUDESP
         erros = validar_regras_negocio_licitacao(doc)
+
+        # Validação cruzada com o Edital de referência (se existir no banco)
+        if licitacao.edital_id:
+            edital = session.get(Edital, licitacao.edital_id)
+            if edital and edital.documento_json:
+                try:
+                    edital_doc = json.loads(edital.documento_json)
+                    itens_edital = edital_doc.get("itensCompra") or []
+                    numeros_edital = {item["numeroItem"] for item in itens_edital if "numeroItem" in item}
+                    numeros_licitacao = {item["numeroItem"] for item in doc.get("itens", []) if "numeroItem" in item}
+                    
+                    # Itens do edital ausentes na licitação
+                    ausentes = numeros_edital - numeros_licitacao
+                    if ausentes:
+                        erros.append(f"Itens do edital ausentes na licitação: {sorted(list(ausentes))}.")
+                except Exception:
+                    pass
+
         if erros:
             raise HTTPException(
                 status_code=422,
@@ -270,7 +288,7 @@ class LicitacaoService:
             licitacao.protocolo = protocolo
             licitacao.status_protocolo = "Recebido"
             licitacao.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
-            licitacao.updated_at = datetime.utcnow()
+            licitacao.updated_at = datetime.now(timezone.utc)
             session.add(licitacao)
             session.commit()
             session.refresh(licitacao)
@@ -282,7 +300,7 @@ class LicitacaoService:
             }
         else:
             licitacao.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
-            licitacao.updated_at = datetime.utcnow()
+            licitacao.updated_at = datetime.now(timezone.utc)
             session.add(licitacao)
             session.commit()
             raise HTTPException(
@@ -306,7 +324,7 @@ class LicitacaoService:
             novo_status = resultado.get("status") or licitacao.status_protocolo
             licitacao.status_protocolo = novo_status
             licitacao.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
-            licitacao.updated_at = datetime.utcnow()
+            licitacao.updated_at = datetime.now(timezone.utc)
             session.add(licitacao)
             session.commit()
             session.refresh(licitacao)
@@ -329,7 +347,7 @@ class LicitacaoService:
         if not licitacao:
             raise HTTPException(status_code=404, detail="Licitação não encontrada")
         licitacao.status = "draft"
-        licitacao.updated_at = datetime.utcnow()
+        licitacao.updated_at = datetime.now(timezone.utc)
         session.add(licitacao)
         session.commit()
         session.refresh(licitacao)

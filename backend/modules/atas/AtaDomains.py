@@ -21,6 +21,12 @@ def validar_regras_negocio_ata(dados: Dict[str, Any]) -> List[str]:
         
     if not dados.get("numeroAtaRegistroPreco"):
         erros.append("Número da Ata no sistema de origem é obrigatório.")
+    elif len(str(dados.get("numeroAtaRegistroPreco", ""))) > 30:
+        erros.append("O campo 'numeroAtaRegistroPreco' não pode exceder 30 caracteres.")
+        
+    codigo_ata = descritor.get("codigoAta", "")
+    if codigo_ata and len(str(codigo_ata)) > 31:
+        erros.append("O campo 'codigoAta' não pode exceder 31 caracteres.")
         
     if not dados.get("anoAta"):
         erros.append("Ano da Ata é obrigatório.")

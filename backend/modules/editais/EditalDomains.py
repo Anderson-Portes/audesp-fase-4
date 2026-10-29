@@ -35,12 +35,12 @@ DOMINIO_MODALIDADES = {
 }
 
 # Regra da tabela de Domínio "Instrumento Convocatório":
-# Validação estrita do Instrumento com a Modalidade de Contratação
+# Validação estrita do Instrumento com a Modalidade de Contratação (Fase IV v04)
 MODALIDADES_PERMITIDAS_POR_INSTRUMENTO = {
-    1: [1, 2, 3, 4, 5, 6, 7, 13, 14, 997, 998, 999], # Edital
-    2: [8, 14],                                       # Aviso de Contratação Direta (Dispensa com Disputa)
-    3: [8, 9, 14],                                    # Ato que autoriza Contratação Direta (Dispensa sem Disputa ou Inexigibilidade)
-    4: [12, 14]                                       # Edital de Chamamento Público
+    1: [1, 2, 3, 4, 5, 6, 7, 13, 14, 16, 17, 18, 19, 997, 998, 999], # Edital (inclui internacionais)
+    2: [8, 14],                                                       # Aviso de Contratação Direta (Dispensa com Disputa)
+    3: [8, 9, 14],                                                    # Ato que autoriza Contratação Direta (Dispensa sem Disputa ou Inexigibilidade)
+    4: [12, 14]                                                       # Edital de Chamamento Público
 }
 
 # Domínio PNCP: Modo de Disputa
@@ -139,9 +139,9 @@ def validar_regras_negocio_edital(doc: Dict[str, Any], has_pdf: bool) -> List[st
                 id_pncp = str(pub.get("idContratacaoPNCP") or "").strip()
                 if not id_pncp or len(id_pncp) != 25 or not id_pncp.isdigit():
                     erros.append(f"Publicação {idx}: No veículo PNCP, 'idContratacaoPNCP' deve ter exatamente 25 dígitos numéricos.")
-            if v_id == 10:
+            if v_id in (9, 10):
                 nome_outro = str(pub.get("veiculoPublicacaoNome") or "").strip()
-                if not nome_outro:
+                if not nome_outro and v_id == 10:
                     erros.append(f"Publicação {idx}: Para o veículo 'Outros' (10), 'veiculoPublicacaoNome' é obrigatório.")
                     
     # Observação da documentação: Se algum veiculoPublicacao = 5 (PNCP), o codigoEdital deve ser o número de controle PNCP
@@ -156,13 +156,15 @@ def validar_regras_negocio_edital(doc: Dict[str, Any], has_pdf: bool) -> List[st
     if not modalidade:
         erros.append("Campo 'modalidadeId' é obrigatório.")
     elif tipo_inst in MODALIDADES_PERMITIDAS_POR_INSTRUMENTO:
-        permitidas = MODALIDADES_PERMITIDAS_POR_INSTRUMENTO[tipo_inst]
-        if modalidade not in permitidas:
-            nomes_permitidas = [f"{m} ({DOMINIO_MODALIDADES.get(m, '')})" for m in permitidas]
-            erros.append(
-                f"Modalidade {modalidade} não é permitida para o Instrumento Convocatório {tipo_inst} "
-                f"({DOMINIO_INSTRUMENTOS.get(tipo_inst, '')}). Permitidas: {', '.join(nomes_permitidas)}."
-            )
+        # Credenciamento (12) e Chamada pública (15) não têm restrição rígida de instrumento
+        if modalidade not in (12, 15):
+            permitidas = MODALIDADES_PERMITIDAS_POR_INSTRUMENTO[tipo_inst]
+            if modalidade not in permitidas:
+                nomes_permitidas = [f"{m} ({DOMINIO_MODALIDADES.get(m, '')})" for m in permitidas]
+                erros.append(
+                    f"Modalidade {modalidade} não é permitida para o Instrumento Convocatório {tipo_inst} "
+                    f"({DOMINIO_INSTRUMENTOS.get(tipo_inst, '')}). Permitidas: {', '.join(nomes_permitidas)}."
+                )
             
     # 4. Validação de Datas de Abertura / Encerramento de Propostas
     # Observação: Obrigatório para Instrumento 1 (Edital) ou 2 (Aviso de Contratação Direta: dispensa com disputa)

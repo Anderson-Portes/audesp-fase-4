@@ -17,8 +17,11 @@ import {
   Send, 
   ArrowLeft, 
   CheckSquare, 
-  Square,
-  AlertCircle
+  Square, 
+  AlertCircle,
+  RefreshCw,
+  RotateCcw,
+  CheckCircle2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -39,7 +42,14 @@ export const AjusteForm: React.FC = () => {
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState(false);
   const [dominios, setDominios] = useState<DominiosAjusteResponse | null>(null);
+
+  // Status de Transmissão / Protocolo
+  const [ajusteStatus, setAjusteStatus] = useState<'draft' | 'sent' | 'error'>('draft');
+  const [protocolo, setProtocolo] = useState<string | null>(null);
+  const [statusProtocolo, setStatusProtocolo] = useState<string | null>(null);
+  const [detalhesProtocolo, setDetalhesProtocolo] = useState<any>(null);
 
   // Listas de origem para autopreenchimento
   const [editais, setEditais] = useState<Edital[]>([]);
@@ -52,8 +62,8 @@ export const AjusteForm: React.FC = () => {
   const [ataId, setAtaId] = useState<number | ''>('');
 
   // 1. Descritor
-  const [municipio, setMunicipio] = useState<number>(7107);
-  const [entidade, setEntidade] = useState<number>(10048);
+  const [municipio, setMunicipio] = useState<number>(7071);
+  const [entidade, setEntidade] = useState<number>(11310);
   const [adesaoParticipacao, setAdesaoParticipacao] = useState<boolean>(false);
   const [codigoEdital, setCodigoEdital] = useState('');
   const [codigoAta, setCodigoAta] = useState('');
@@ -133,6 +143,14 @@ export const AjusteForm: React.FC = () => {
           setCodigoAta(ajuste.codigo_ata || '');
           setCodigoContrato(ajuste.codigo_contrato);
           setRetificacao(ajuste.retificacao);
+          setAjusteStatus(ajuste.status as any || 'draft');
+          setProtocolo(ajuste.protocolo || null);
+          setStatusProtocolo(ajuste.status_protocolo || null);
+          try {
+            setDetalhesProtocolo(ajuste.detalhes_protocolo ? JSON.parse(ajuste.detalhes_protocolo) : null);
+          } catch {
+            setDetalhesProtocolo(null);
+          }
 
           setTipoContratoId(ajuste.tipo_contrato_id);
           setNumeroContratoEmpenho(ajuste.numero_contrato_empenho);
@@ -187,10 +205,17 @@ export const AjusteForm: React.FC = () => {
     }
   }, [id, isEditing]);
 
+  // Atas filtradas para o edital selecionado (ou todas se nenhum selecionado)
+  const atasDisponiveis = editalId
+    ? atas.filter((a) => a.edital_id === Number(editalId) || (codigoEdital && a.codigo_edital === codigoEdital))
+    : atas;
+
   const handleSelectEdital = async (eId: number) => {
     setEditalId(eId);
     if (!eId) {
       setSelectedEdital(null);
+      setAtaId('');
+      setCodigoAta('');
       return;
     }
     try {
@@ -203,6 +228,15 @@ export const AjusteForm: React.FC = () => {
       setProcesso(ed.numero_processo || '');
       setObjetoContrato(ed.objeto_compra || '');
 
+      // Se havia uma ata selecionada que não pertence a este edital, reseta
+      if (ataId) {
+        const ataAtual = atas.find((a) => a.id === Number(ataId));
+        if (ataAtual && ataAtual.edital_id !== eId && ataAtual.codigo_edital !== ed.codigo_edital) {
+          setAtaId('');
+          setCodigoAta('');
+        }
+      }
+
       const itens = (ed as any).parsed_documento?.itensCompra || (ed as any).documento?.itensCompra;
       if (itens && Array.isArray(itens)) {
         setSelectedItens(itens.map((it: any) => it.numeroItem));
@@ -214,14 +248,19 @@ export const AjusteForm: React.FC = () => {
 
   const handleSelectAta = async (aId: number) => {
     setAtaId(aId);
-    if (!aId) return;
+    if (!aId) {
+      setCodigoAta('');
+      return;
+    }
     try {
       const { ata, documento } = await ataService.getAtaById(aId);
       setCodigoAta(ata.codigo_ata);
-      setCodigoEdital(ata.codigo_edital);
+      if (!editalId && ata.codigo_edital) {
+        setCodigoEdital(ata.codigo_edital);
+      }
       setMunicipio(ata.municipio);
       setEntidade(ata.entidade);
-      if (ata.edital_id) {
+      if (ata.edital_id && ata.edital_id !== editalId) {
         setEditalId(ata.edital_id);
         const ed = await editalService.getEdital(ata.edital_id);
         setSelectedEdital(ed);
@@ -257,8 +296,27 @@ export const AjusteForm: React.FC = () => {
       toast.error('Informe o Código do Edital de referência.');
       return;
     }
-    if (!numeroContratoEmpenho) {
-      toast.error('Informe o Número do Contrato/Empenho.');
+    if (!codigoEdital) {
+      toast.error('Informe o Código do Edital.');
+      return;
+    }
+
+    // Validação SRP: se edital é SRP e não é adesão, a ata vinculada é obrigatória
+    const editalDoc = selectedEdital?.parsed_documento || selectedEdital?.documento;
+    const isSrp = Boolean(editalDoc?.srp);
+    if (!adesaoParticipacao && isSrp && !codigoAta) {
+      toast.error('O Edital selecionado é do tipo SRP (Sistema de Registro de Preços): informe ou selecione a Ata vinculada.');
+      return;
+    }
+
+    // Código do contrato: até 25 caracteres (se sem PNCP, validação flexível de tamanho local)
+    const codContratoFinal = codigoContrato || `CONTR-${numeroContratoEmpenho}/${anoContrato}`;
+    if (codContratoFinal.length > 25) {
+      toast.error('Código único do contrato (codigoContrato) deve ter no máximo 25 caracteres.');
+      return;
+    }
+    if (codigoAta && codigoAta.length > 31) {
+      toast.error('Código da Ata deve ter no máximo 31 caracteres.');
       return;
     }
     if (!processo) {
@@ -285,8 +343,6 @@ export const AjusteForm: React.FC = () => {
       toast.error('Selecione ao menos um item contratado.');
       return;
     }
-
-    const codContratoFinal = codigoContrato || `CONTR-${numeroContratoEmpenho}/${anoContrato}`;
 
     const descritor: any = {
       municipio: Number(municipio),
@@ -355,9 +411,11 @@ export const AjusteForm: React.FC = () => {
       toast.success(isEditing ? 'Ajuste/Contrato atualizado com sucesso!' : 'Ajuste/Contrato criado com sucesso!');
 
       if (transmitirAposSalvar) {
+        setSending(true);
         toast.loading('Transmitindo para o AUDESP...', { id: 'transmissao' });
         const resEnvio = await ajusteService.enviarAjuste(resAjuste.id);
         toast.dismiss('transmissao');
+        setSending(false);
         if (resEnvio.sucesso) {
           toast.success(`Contrato transmitido! Protocolo: ${resEnvio.protocolo}`);
           navigate('/ajustes');
@@ -366,13 +424,52 @@ export const AjusteForm: React.FC = () => {
           navigate(`/ajustes/${resAjuste.id}`);
         }
       } else {
-        navigate('/ajustes');
+        if (!isEditing) {
+          navigate(`/ajustes/${resAjuste.id}`);
+        }
       }
     } catch (err: any) {
       const msg = err.response?.data?.detail || 'Erro ao salvar ajuste.';
       toast.error(msg);
     } finally {
       setSaving(false);
+      setSending(false);
+    }
+  };
+
+  const handleConsultarProtocolo = async () => {
+    if (!id) return;
+    try {
+      setSending(true);
+      const res = await ajusteService.consultarProtocolo(Number(id));
+      if (res.sucesso) {
+        setStatusProtocolo(res.status);
+        setDetalhesProtocolo(res.detalhes);
+        toast.success(`Status atualizado: ${res.status}`);
+      } else {
+        toast.error(res.mensagem || 'Erro ao consultar protocolo.');
+      }
+    } catch {
+      toast.error('Falha ao consultar protocolo no AUDESP');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleRetornarRascunho = async () => {
+    if (!id) return;
+    if (!window.confirm('Deseja retornar este contrato para rascunho para corrigir eventuais dados?')) {
+      return;
+    }
+    try {
+      setLoading(true);
+      await ajusteService.retornarRascunho(Number(id));
+      setAjusteStatus('draft');
+      toast.success('Contrato retornado para rascunho com sucesso!');
+    } catch {
+      toast.error('Erro ao retornar contrato para rascunho');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -385,44 +482,49 @@ export const AjusteForm: React.FC = () => {
     );
   }
 
+  const isSent = ajusteStatus === 'sent';
   const itensEdital = selectedEdital?.parsed_documento?.itensCompra || selectedEdital?.documento?.itensCompra;
 
   return (
-    <Container fluid className="p-4">
+    <Container fluid className="p-0 pb-5">
       <PageHeader
-        title={isEditing ? `Editar Ajuste: ${numeroContratoEmpenho}/${anoContrato}` : 'Novo Ajuste / Contrato (Fase IV)'}
-        description="Emissão e transmissão de contratos, termos aditivos e apostilamentos (AUDESP / TCESP)"
+        title={isSent ? 'Contrato Transmitido (Fase IV)' : id ? `Editar Ajuste: ${numeroContratoEmpenho}/${anoContrato}` : 'Novo Ajuste / Contrato (Fase IV)'}
         actions={
-          <div className="d-flex gap-2">
-            <Button
-              variant="outline-secondary"
-              onClick={() => navigate('/ajustes')}
-              className="d-flex align-items-center gap-1"
-            >
-              <ArrowLeft size={16} />
-              <span>Voltar</span>
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => handleSalvar(false)}
-              disabled={saving}
-              className="d-flex align-items-center gap-1"
-            >
-              <Save size={16} />
-              <span>Salvar Rascunho</span>
-            </Button>
-            <Button
-              variant="success"
-              onClick={() => handleSalvar(true)}
-              disabled={saving}
-              className="d-flex align-items-center gap-1"
-            >
-              <Send size={16} />
-              <span>Salvar e Transmitir</span>
-            </Button>
-          </div>
+          <button
+            onClick={() => navigate('/ajustes')}
+            className="btn btn-outline-light btn-sm d-flex align-items-center gap-1"
+          >
+            <ArrowLeft size={16} /> Voltar à Lista
+          </button>
         }
       />
+
+      {/* Protocol Banner if Sent */}
+      {isSent && (
+        <div className={`alert ${statusProtocolo?.toLowerCase().includes('rejeitado') ? 'alert-danger' : 'alert-success'} d-flex justify-content-between align-items-center shadow-sm mb-4`}>
+          <div>
+            <h5 className="alert-heading mb-1 d-flex align-items-center gap-2">
+              <CheckCircle2 size={20} /> Protocolo AUDESP: <strong>{protocolo}</strong>
+            </h5>
+            <p className="mb-0 small">
+              Situação no Tribunal de Contas: <strong>{statusProtocolo || 'Recebido'}</strong>
+            </p>
+            {detalhesProtocolo?.erros?.length > 0 && (
+              <div className="mt-2 pt-2 border-top border-danger-subtle small">
+                <strong>Erros / Notificações do TCESP:</strong>
+                <ul className="mb-0 ps-3 mt-1">
+                  {detalhesProtocolo.erros.map((err: any, idx: number) => (
+                    <li key={idx}>{err.mensagem || err.campo || JSON.stringify(err)}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+          <span className="badge bg-white text-dark fs-6 px-3 py-2 border">
+            Fase IV — TCESP
+          </span>
+        </div>
+      )}
 
       <Row className="g-4">
         {/* Coluna 1: Origem e Dados Contratuais */}
@@ -451,17 +553,32 @@ export const AjusteForm: React.FC = () => {
               </div>
             </Form.Group>
 
+            {adesaoParticipacao && (
+              <div className="alert alert-info py-2 px-3 small mb-3">
+                <strong>Adesão / Participação (Carona):</strong> O vínculo com um edital local é <strong>opcional</strong>.
+                Informe no campo <em>Código do Edital</em> o <strong>ID de Contratação PNCP (25 dígitos)</strong> da entidade gerenciadora e, caso haja ata, o <strong>ID da Ata PNCP (31 dígitos)</strong>.
+              </div>
+            )}
+
             {origemTipo === 'edital' ? (
               <Form.Group className="mb-3">
-                <Form.Label className="fw-bold">Vincular Edital:</Form.Label>
+                <Form.Label className="fw-bold">
+                  Vincular Edital Local {adesaoParticipacao ? '(Opcional na Adesão)' : ''}:
+                  {selectedEdital?.parsed_documento?.srp || selectedEdital?.documento?.srp ? (
+                    <span className="badge bg-info ms-2">SRP (Exige Ata)</span>
+                  ) : null}
+                  {selectedEdital?.sem_pncp ? (
+                    <span className="badge bg-secondary ms-2">Sem PNCP</span>
+                  ) : null}
+                </Form.Label>
                 <Form.Select
                   value={editalId}
                   onChange={(e) => handleSelectEdital(Number(e.target.value))}
                 >
-                  <option value="">-- Selecione o edital de origem --</option>
+                  <option value="">{adesaoParticipacao ? '-- Nenhum (Adesão Externa) --' : '-- Selecione o edital de origem --'}</option>
                   {editais.map((ed) => (
                     <option key={ed.id} value={ed.id}>
-                      {ed.codigo_edital} - {ed.numero_compra}/{ed.ano_compra}
+                      {ed.codigo_edital} - {ed.numero_compra}/{ed.ano_compra} {ed.sem_pncp ? '(Sem PNCP)' : ''}
                     </option>
                   ))}
                 </Form.Select>
@@ -474,12 +591,17 @@ export const AjusteForm: React.FC = () => {
                   onChange={(e) => handleSelectAta(Number(e.target.value))}
                 >
                   <option value="">-- Selecione a ata de origem --</option>
-                  {atas.map((at) => (
+                  {atasDisponiveis.map((at) => (
                     <option key={at.id} value={at.id}>
                       {at.numero_ata_registro_preco}/{at.ano_ata} ({at.codigo_ata}) - Edital: {at.codigo_edital}
                     </option>
                   ))}
                 </Form.Select>
+                {editalId && atasDisponiveis.length === 0 && (
+                  <Form.Text className="text-warning d-block mt-1">
+                    Nenhuma ata encontrada para o edital selecionado.
+                  </Form.Text>
+                )}
               </Form.Group>
             )}
 
@@ -994,6 +1116,63 @@ export const AjusteForm: React.FC = () => {
           </div>
         </Col>
       </Row>
+
+      {/* Botões de Ação no Final do Formulário */}
+      <div className="card shadow-sm border-0 mt-4 p-3 bg-white">
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <button
+            type="button"
+            onClick={() => navigate('/ajustes')}
+            className="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1"
+          >
+            <ArrowLeft size={16} /> Voltar à Lista
+          </button>
+
+          <div className="d-flex align-items-center gap-2">
+            {!isSent ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleSalvar(false)}
+                  disabled={saving || sending}
+                  className="btn btn-outline-success fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                >
+                  <Save size={16} /> {saving ? 'Salvando...' : 'Salvar Rascunho'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSalvar(true)}
+                  disabled={saving || sending}
+                  className="btn btn-warning text-dark fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                >
+                  <Send size={16} /> {sending ? 'Transmitindo...' : 'Transmitir à AUDESP'}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={handleConsultarProtocolo}
+                  disabled={sending}
+                  className="btn btn-outline-primary fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                >
+                  <RefreshCw size={16} className={sending ? 'spin' : ''} /> Atualizar Status
+                </button>
+                {statusProtocolo?.toLowerCase().includes('rejeitado') && (
+                  <button
+                    type="button"
+                    onClick={handleRetornarRascunho}
+                    className="btn btn-warning text-dark fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                  >
+                    <RotateCcw size={16} /> Corrigir e Reenviar
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
     </Container>
   );
 };

@@ -1,13 +1,13 @@
 import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { Button } from 'react-bootstrap';
-import { 
-  Home, 
-  FileText, 
-  Award, 
-  Layers, 
-  FileCheck, 
-  Search, 
+import {
+  Home,
+  FileText,
+  Award,
+  Layers,
+  FileCheck,
+  Search,
   Building2,
   LogOut,
   User as UserIcon
@@ -33,12 +33,12 @@ export const DashboardLayout: React.FC = () => {
             <span className="text-muted small">Fase IV — TCESP</span>
           </div>
         </div>
-        
+
         <nav className="d-flex flex-column gap-1 mt-3">
           <NavLink to="/" className="nav-link fw-bold" end>
             <Home size={18} /> Início (Dashboard)
           </NavLink>
-          
+
           <div className="text-muted text-uppercase px-3 mt-3 mb-1 fw-bold" style={{ fontSize: '0.75rem', letterSpacing: '0.5px' }}>
             Módulos de Envio
           </div>
@@ -46,7 +46,7 @@ export const DashboardLayout: React.FC = () => {
           <NavLink to="/editais" className="nav-link fw-bold">
             <FileText size={18} /> Editais
           </NavLink>
-          
+
           <NavLink to="/licitacoes" className="nav-link fw-bold">
             <Award size={18} /> Licitações
           </NavLink>
@@ -69,13 +69,7 @@ export const DashboardLayout: React.FC = () => {
         </nav>
       </aside>
 
-      <header className="top-header d-flex justify-content-between align-items-center px-4">
-        <div>
-          <span className="text-muted small fw-medium">
-            Prodesan — Tecnologia da Informação
-          </span>
-        </div>
-
+      <header className="top-header d-flex justify-content-end align-items-center px-4">
         <div className="d-flex align-items-center gap-3">
           {user && (
             <div className="d-flex align-items-center gap-2 text-muted small">
@@ -84,7 +78,7 @@ export const DashboardLayout: React.FC = () => {
             </div>
           )}
 
-          <Button 
+          <Button
             variant="outline-danger"
             size="sm"
             onClick={handleLogout}

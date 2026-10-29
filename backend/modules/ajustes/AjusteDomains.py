@@ -60,39 +60,115 @@ DOMINIO_TIPO_OBJETO_CONTRATO = {
     29: "29 – Alienação de bens móveis/imóveis"
 }
 
-def validar_regras_negocio_ajuste(dados: Dict[str, Any]) -> List[str]:
+# Mapeamento oficial Fase IV v04: Objetos do Contrato permitidos por Categoria do Processo
+OBJETOS_POR_CATEGORIA: Dict[int, List[int]] = {
+    1: [1, 2],
+    2: [3, 4, 5, 6, 7, 8, 9, 10, 11],
+    3: [12, 13, 14],
+    4: [15],
+    5: [16],
+    6: [17],
+    7: [18, 19],
+    8: [20, 21, 22, 23, 24, 25, 26, 27],
+    9: [18, 19],
+    10: [28],
+    11: [29],
+}
+
+TIPOS_CONTRATO_COM_VIGENCIA = {1, 2, 3, 4, 5, 8, 12}
+
+
+def validar_regras_negocio_ajuste(dados: Dict[str, Any], edital_srp: bool = False) -> List[str]:
     """Valida as regras de negócio de envio de Ajuste/Contrato conforme o schema do TCESP."""
     erros = []
     
     descritor = dados.get("descritor", {})
-    if not descritor.get("codigoEdital"):
+    cod_edital = str(descritor.get("codigoEdital") or "").strip()
+    if not cod_edital:
         erros.append("Código do Edital é obrigatório no descritor.")
-    if not descritor.get("codigoContrato"):
+    elif len(cod_edital) > 25:
+        erros.append("Código do Edital deve ter no máximo 25 caracteres.")
+
+    cod_contrato = str(descritor.get("codigoContrato") or "").strip()
+    if not cod_contrato:
         erros.append("Código único do Ajuste/Contrato (codigoContrato) é obrigatório.")
+    elif len(cod_contrato) > 25:
+        erros.append("Código único do Ajuste/Contrato deve ter no máximo 25 caracteres.")
+
+    # Validação de Ata e Códigos na adesão
+    cod_ata = str(descritor.get("codigoAta") or "").strip()
+    adesao = bool(descritor.get("adesaoParticipacao", False))
+
+    if adesao:
+        # Na adesão, os identificadores são os IDs PNCP da entidade gerenciadora
+        digits_edital = "".join(filter(str.isdigit, cod_edital))
+        if len(digits_edital) != 25:
+            erros.append("Na adesão ou participação, informe o ID de Contratação PNCP do edital com 25 dígitos.")
+        if cod_ata:
+            digits_ata = "".join(filter(str.isdigit, cod_ata))
+            if len(digits_ata) != 31:
+                erros.append("Na adesão, informe o ID da Ata PNCP com 31 dígitos ou deixe o campo vazio.")
+    else:
+        if cod_ata and len(cod_ata) > 31:
+            erros.append("Código da Ata deve ter no máximo 31 caracteres.")
+
+        # Se o edital de origem for SRP e não for adesão/participação externa, a Ata é obrigatória
+        if edital_srp and not cod_ata:
+            erros.append(
+                "O Edital vinculado é do tipo SRP (Sistema de Registro de Preços): a vinculação da Ata de Registro de Preços é obrigatória no Ajuste quando não for adesão."
+            )
         
-    if not dados.get("tipoContratoId"):
+    tipo_contrato = dados.get("tipoContratoId")
+    if not tipo_contrato:
         erros.append("Tipo de Contrato é obrigatório.")
-    if not dados.get("numeroContratoEmpenho"):
+
+    num_contrato = str(dados.get("numeroContratoEmpenho") or "").strip()
+    if not num_contrato:
         erros.append("Número do contrato ou empenho no sistema de origem é obrigatório.")
+    elif len(num_contrato) > 50:
+        erros.append("Número do contrato ou empenho deve ter no máximo 50 caracteres.")
+
     if not dados.get("anoContrato"):
         erros.append("Ano do contrato é obrigatório.")
-    if not dados.get("processo"):
+
+    processo = str(dados.get("processo") or "").strip()
+    if not processo:
         erros.append("Número do processo é obrigatório.")
-    if not dados.get("categoriaProcessoId"):
+    elif len(processo) > 50:
+        erros.append("Número do processo deve ter no máximo 50 caracteres.")
+
+    cat_proc = dados.get("categoriaProcessoId")
+    tipo_obj = dados.get("tipoObjetoContrato")
+    if not cat_proc:
         erros.append("Categoria do processo é obrigatória.")
-    if not dados.get("tipoObjetoContrato"):
+    if not tipo_obj:
         erros.append("Tipo de Objeto do Contrato é obrigatório.")
+    elif cat_proc and cat_proc in OBJETOS_POR_CATEGORIA:
+        permitidos = OBJETOS_POR_CATEGORIA[cat_proc]
+        if tipo_obj not in permitidos:
+            erros.append(
+                f"Objeto do Contrato {tipo_obj} não é permitido para a Categoria de Processo {cat_proc}."
+            )
         
     # Fornecedor
-    if not dados.get("niFornecedor"):
+    ni_forn = str(dados.get("niFornecedor") or "").strip()
+    t_pes_forn = dados.get("tipoPessoaFornecedor")
+    nome_forn = str(dados.get("nomeRazaoSocialFornecedor") or "").strip()
+
+    if not ni_forn:
         erros.append("Número de identificação (CPF/CNPJ) do fornecedor é obrigatório.")
-    if not dados.get("tipoPessoaFornecedor"):
+    if not t_pes_forn:
         erros.append("Tipo de pessoa do fornecedor (PJ, PF, PE) é obrigatório.")
-    if not dados.get("nomeRazaoSocialFornecedor"):
+    if not nome_forn:
         erros.append("Razão Social/Nome do fornecedor é obrigatório.")
+    elif len(nome_forn) > 100:
+        erros.append("Nome/Razão Social do fornecedor deve ter no máximo 100 caracteres.")
         
-    if not dados.get("objetoContrato"):
+    obj_contrato = str(dados.get("objetoContrato") or "").strip()
+    if not obj_contrato:
         erros.append("Descrição do objeto do contrato é obrigatória.")
+    elif len(obj_contrato) > 5120:
+        erros.append("Descrição do objeto do contrato deve ter no máximo 5120 caracteres.")
         
     if dados.get("valorInicial") is None:
         erros.append("Valor inicial do contrato é obrigatório.")
@@ -100,8 +176,17 @@ def validar_regras_negocio_ajuste(dados: Dict[str, Any]) -> List[str]:
     if not dados.get("dataAssinatura"):
         erros.append("Data de assinatura do contrato é obrigatória.")
         
+    # Vigência condicional (Fase IV v04)
     dt_inicio = dados.get("dataVigenciaInicio")
     dt_fim = dados.get("dataVigenciaFim")
+    vig_meses = dados.get("vigenciaMeses")
+
+    if tipo_contrato in TIPOS_CONTRATO_COM_VIGENCIA:
+        if not dt_inicio and (vig_meses is None or vig_meses <= 0):
+            erros.append("Para o tipo de contrato informado, forneça a 'dataVigenciaInicio' ou a 'vigenciaMeses'.")
+        if dt_inicio and not dt_fim:
+            erros.append("Quando 'dataVigenciaInicio' for informada, 'dataVigenciaFim' também é obrigatória.")
+
     if dt_inicio and dt_fim and dt_fim < dt_inicio:
         erros.append("A data de término da vigência não pode ser anterior à data inicial.")
         

@@ -170,37 +170,39 @@ export const LicitacoesList: React.FC = () => {
     <Container fluid className="p-0">
       <PageHeader 
         title="Licitações e Julgamentos de Propostas (Fase IV)"
-        actions={
-          <Button 
-            variant="light"
-            onClick={() => navigate('/licitacoes/novo')}
-            className="text-success fw-bold d-flex align-items-center gap-2 shadow-sm"
-          >
-            <Plus size={18} /> Nova Licitação
-          </Button>
-        }
       />
 
       <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
-        {/* Tabs com ButtonGroup do React-Bootstrap */}
-        <ButtonGroup className="shadow-sm bg-white p-1 rounded">
-          <Button
+        {/* Tabs com ButtonGroup do React-Bootstrap e Botão Novo */}
+        <div className="d-flex align-items-center gap-3">
+          <ButtonGroup className="shadow-sm bg-white p-1 rounded">
+            <Button
+              size="sm"
+              variant={tab === 'draft' ? 'success' : 'light'}
+              className={`px-4 py-2 fw-medium ${tab === 'draft' ? 'text-white shadow-sm' : 'text-dark'}`}
+              onClick={() => setTab('draft')}
+            >
+              <Edit size={16} className="me-1 d-inline" /> Rascunhos
+            </Button>
+            <Button
+              size="sm"
+              variant={tab === 'sent' ? 'success' : 'light'}
+              className={`px-4 py-2 fw-medium ${tab === 'sent' ? 'text-white shadow-sm' : 'text-dark'}`}
+              onClick={() => setTab('sent')}
+            >
+              <CheckCircle2 size={16} className="me-1 d-inline" /> Enviados ao AUDESP
+            </Button>
+          </ButtonGroup>
+
+          <Button 
+            variant="success"
             size="sm"
-            variant={tab === 'draft' ? 'success' : 'light'}
-            className={`px-4 py-2 fw-medium ${tab === 'draft' ? 'text-white shadow-sm' : 'text-dark'}`}
-            onClick={() => setTab('draft')}
+            onClick={() => navigate('/licitacoes/novo')}
+            className="fw-bold d-flex align-items-center gap-2 shadow-sm py-2 px-3"
           >
-            <Edit size={16} className="me-1 d-inline" /> Rascunhos
+            <Plus size={18} /> Nova Licitação
           </Button>
-          <Button
-            size="sm"
-            variant={tab === 'sent' ? 'success' : 'light'}
-            className={`px-4 py-2 fw-medium ${tab === 'sent' ? 'text-white shadow-sm' : 'text-dark'}`}
-            onClick={() => setTab('sent')}
-          >
-            <CheckCircle2 size={16} className="me-1 d-inline" /> Enviadas ao AUDESP
-          </Button>
-        </ButtonGroup>
+        </div>
 
         {/* Busca com Form e InputGroup */}
         <Form onSubmit={handleSearchSubmit} className="d-flex align-items-center gap-2">

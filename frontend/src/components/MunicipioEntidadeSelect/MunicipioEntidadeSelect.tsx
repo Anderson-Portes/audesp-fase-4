@@ -25,13 +25,19 @@ export const MunicipioEntidadeSelect: React.FC<MunicipioEntidadeSelectProps> = (
   municipioColMd = 6,
   entidadeColMd = 6
 }) => {
-  // Entidades filtradas de acordo com o município selecionado (se houver correspondência)
+  // Entidades pertencentes estritamente ao município selecionado
   const entidadesFiltradas = entidadesList.filter(
-    (e) => !municipio || e.municipio === Number(municipio)
+    (e) => e.municipio === Number(municipio)
   );
 
   const isMunicipioCadastrado = municipiosList.some((m) => m.codigo === Number(municipio));
-  const isEntidadeCadastrada = entidadesList.some((e) => e.codigo === Number(entidade));
+  const isEntidadeCadastrada = entidadesFiltradas.some((e) => e.codigo === Number(entidade));
+
+  const [customMunicipioMode, setCustomMunicipioMode] = React.useState(false);
+  const [customEntidadeMode, setCustomEntidadeMode] = React.useState(false);
+
+  const isCustomMun = customMunicipioMode || (!isMunicipioCadastrado && Boolean(municipio));
+  const isCustomEnt = customEntidadeMode || (!isEntidadeCadastrada && Boolean(entidade));
 
   return (
     <>
@@ -42,18 +48,25 @@ export const MunicipioEntidadeSelect: React.FC<MunicipioEntidadeSelectProps> = (
           </Form.Label>
           <Form.Select
             size="sm"
-            value={isMunicipioCadastrado ? municipio : (municipio ? 'CUSTOM' : '')}
+            value={isCustomMun ? 'CUSTOM' : (municipio || '')}
             onChange={(e) => {
               const val = e.target.value;
               if (val === 'CUSTOM') {
-                // Mantém o valor atual ou 0 para edição manual
+                setCustomMunicipioMode(true);
               } else if (val) {
+                setCustomMunicipioMode(false);
                 const cod = Number(val);
                 onMunicipioChange(cod);
-                // Se a entidade atual não pertence ao novo município, reseta ou seleciona a primeira
+
+                // Ao mudar o município, filtra as entidades pertencentes a ele
                 const possiveis = entidadesList.filter((ent) => ent.municipio === cod);
-                if (possiveis.length > 0 && !possiveis.some((ent) => ent.codigo === entidade)) {
+                if (possiveis.length > 0) {
                   onEntidadeChange(possiveis[0].codigo);
+                  setCustomEntidadeMode(false);
+                } else {
+                  // Se o município não tem entidades cadastradas, zera a entidade
+                  onEntidadeChange(0);
+                  setCustomEntidadeMode(false);
                 }
               }
             }}
@@ -61,21 +74,19 @@ export const MunicipioEntidadeSelect: React.FC<MunicipioEntidadeSelectProps> = (
             className="mb-1"
           >
             {municipiosList.length === 0 && (
-              <option value={7107}>7107 - Santos (SP)</option>
+              <option value={7071}>7071 - Santos (SP)</option>
             )}
             {municipiosList.map((m) => (
               <option key={m.codigo} value={m.codigo}>
                 {m.codigo} — {m.nome} ({m.uf})
               </option>
             ))}
-            {!isMunicipioCadastrado && municipio ? (
-              <option value="CUSTOM">Outro: Código {municipio}</option>
-            ) : (
-              <option value="CUSTOM">Outro (Digitar código manual)...</option>
-            )}
+            <option value="CUSTOM">
+              {isCustomMun ? `Outro: Código manual (${municipio || 'digitar'})` : 'Outro (Digitar código manual)...'}
+            </option>
           </Form.Select>
 
-          {(!isMunicipioCadastrado || (!municipiosList.length && municipio !== 7107)) && (
+          {isCustomMun && (
             <Form.Control
               type="number"
               size="sm"
@@ -96,40 +107,37 @@ export const MunicipioEntidadeSelect: React.FC<MunicipioEntidadeSelectProps> = (
           </Form.Label>
           <Form.Select
             size="sm"
-            value={isEntidadeCadastrada ? entidade : (entidade ? 'CUSTOM' : '')}
+            value={isCustomEnt ? 'CUSTOM' : (entidade || '')}
             onChange={(e) => {
               const val = e.target.value;
-              if (val !== 'CUSTOM' && val) {
+              if (val === 'CUSTOM') {
+                setCustomEntidadeMode(true);
+              } else if (val === '') {
+                setCustomEntidadeMode(false);
+                onEntidadeChange(0);
+              } else if (val) {
+                setCustomEntidadeMode(false);
                 onEntidadeChange(Number(val));
               }
             }}
             disabled={disabled}
             className="mb-1"
           >
-            {entidadesFiltradas.length === 0 && (
-              <option value={10048}>10048 - PRODESAN (Santos)</option>
-            )}
-            {entidadesFiltradas.map((ent) => (
-              <option key={ent.codigo} value={ent.codigo}>
-                {ent.codigo} — {ent.nome}
-              </option>
-            ))}
-            {/* Se houver entidades de outros municípios cadastradas mas não na lista filtrada */}
-            {entidadesList
-              .filter((ent) => ent.municipio !== Number(municipio))
-              .map((ent) => (
-                <option key={`ext-${ent.codigo}`} value={ent.codigo}>
-                  {ent.codigo} — {ent.nome} (Mun. {ent.municipio})
-                </option>
-              ))}
-            {!isEntidadeCadastrada && entidade ? (
-              <option value="CUSTOM">Outra: Código {entidade}</option>
+            {entidadesFiltradas.length === 0 ? (
+              <option value="">-- Nenhuma entidade cadastrada para este município --</option>
             ) : (
-              <option value="CUSTOM">Outra (Digitar código manual)...</option>
+              entidadesFiltradas.map((ent) => (
+                <option key={ent.codigo} value={ent.codigo}>
+                  {ent.codigo} — {ent.nome}
+                </option>
+              ))
             )}
+            <option value="CUSTOM">
+              {isCustomEnt ? `Outra: Código manual (${entidade || 'digitar'})` : 'Outra (Digitar código manual)...'}
+            </option>
           </Form.Select>
 
-          {(!isEntidadeCadastrada || (!entidadesFiltradas.length && entidade !== 10048)) && (
+          {isCustomEnt && (
             <Form.Control
               type="number"
               size="sm"

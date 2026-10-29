@@ -1,7 +1,10 @@
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlmodel import SQLModel, Field
 from sqlalchemy import Column, Text
+
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 class Licitacao(SQLModel, table=True):
     __tablename__ = "licitacoes"
@@ -32,5 +35,5 @@ class Licitacao(SQLModel, table=True):
     # JSON completo em estrita conformidade com licitacao_schema.json
     documento_json: str = Field(sa_column=Column(Text))
     
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=now_utc)
+    updated_at: datetime = Field(default_factory=now_utc)

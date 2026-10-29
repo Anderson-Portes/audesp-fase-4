@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 
 export interface AudespUser {
   email: string;
@@ -54,6 +54,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(null);
     setUser(null);
   };
+
+  // Auto logout when token expires
+  useEffect(() => {
+    if (token && user?.expira_em) {
+      const now = Date.now();
+      const timeout = user.expira_em - now;
+      if (timeout > 0) {
+        const timer = setTimeout(() => {
+          signOut();
+        }, timeout);
+        return () => clearTimeout(timer);
+      } else {
+        signOut();
+      }
+    }
+  }, [token, user]);
 
   return (
     <AuthContext.Provider value={{ user, token, isAuthenticated: !!token, signIn, signOut }}>

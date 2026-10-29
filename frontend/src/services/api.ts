@@ -16,6 +16,13 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (error.response && error.response.status === 401) {
+      // Token invalid or expired: clear auth and reload login page
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      // Force reload to go to login (or navigate if router used)
+      window.location.reload();
+    }
     return Promise.reject(error);
   }
 );

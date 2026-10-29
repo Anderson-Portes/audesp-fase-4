@@ -47,7 +47,8 @@ def _tratar_resposta_requisicao(response: requests.Response, msg_sucesso_padrao:
 
 def _executar_requisicao(metodo: str, endpoint: str, **kwargs) -> Dict[str, Any]:
     """Centraliza o try/except para erros de conexão e timeout com requests."""
-    kwargs.setdefault("verify", False)
+    verify_ssl = os.getenv("AUDESP_VERIFY_SSL", "true").lower() in ("true", "1", "yes")
+    kwargs.setdefault("verify", verify_ssl)
     kwargs.setdefault("timeout", 45)
     
     try:

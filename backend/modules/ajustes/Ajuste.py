@@ -1,7 +1,10 @@
 from typing import Optional
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from sqlmodel import SQLModel, Field
 from sqlalchemy import Column, Text
+
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 class AjusteContrato(SQLModel, table=True):
     __tablename__ = "ajustes_contratos"
@@ -50,5 +53,5 @@ class AjusteContrato(SQLModel, table=True):
     # Documento JSON completo transmitido ao AUDESP
     documento_json: str = Field(sa_column=Column(Text))
     
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=now_utc)
+    updated_at: datetime = Field(default_factory=now_utc)

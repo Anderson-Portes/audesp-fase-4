@@ -1,7 +1,7 @@
 import os
 import json
 from typing import Optional, List, Tuple, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import HTTPException, UploadFile
 from sqlmodel import Session, select, or_
@@ -142,7 +142,7 @@ class EditalService:
             documento_json=json.dumps(doc_dict, ensure_ascii=False),
             pdf_path=payload.get("pdf_path"),
             pdf_nome_original=payload.get("pdf_nome_original"),
-            updated_at=datetime.utcnow()
+            updated_at=datetime.now(timezone.utc)
         )
         session.add(edital)
         session.commit()
@@ -191,7 +191,7 @@ class EditalService:
         if "pdf_nome_original" in payload:
             edital.pdf_nome_original = payload["pdf_nome_original"]
 
-        edital.updated_at = datetime.utcnow()
+        edital.updated_at = datetime.now(timezone.utc)
         session.add(edital)
         session.commit()
         session.refresh(edital)
@@ -245,7 +245,7 @@ class EditalService:
             arquivo.tamanho = tamanho
             arquivo.tipo_mime = file.content_type or "application/pdf"
             arquivo.conteudo = conteudo_bytes
-            arquivo.updated_at = datetime.utcnow()
+            arquivo.updated_at = datetime.now(timezone.utc)
             session.add(arquivo)
         else:
             arquivo = EditalArquivo(
@@ -259,7 +259,7 @@ class EditalService:
 
         edital.pdf_path = f"db://editais/{edital.id}/pdf"
         edital.pdf_nome_original = file.filename
-        edital.updated_at = datetime.utcnow()
+        edital.updated_at = datetime.now(timezone.utc)
         session.add(edital)
         session.commit()
         session.refresh(edital)
@@ -340,7 +340,7 @@ class EditalService:
             edital.protocolo = protocolo
             edital.status_protocolo = "Recebido"
             edital.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
-            edital.updated_at = datetime.utcnow()
+            edital.updated_at = datetime.now(timezone.utc)
             session.add(edital)
             session.commit()
             session.refresh(edital)
@@ -352,7 +352,7 @@ class EditalService:
             }
         else:
             edital.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
-            edital.updated_at = datetime.utcnow()
+            edital.updated_at = datetime.now(timezone.utc)
             session.add(edital)
             session.commit()
             raise HTTPException(
@@ -376,7 +376,7 @@ class EditalService:
             novo_status = resultado.get("status") or edital.status_protocolo
             edital.status_protocolo = novo_status
             edital.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
-            edital.updated_at = datetime.utcnow()
+            edital.updated_at = datetime.now(timezone.utc)
             session.add(edital)
             session.commit()
             session.refresh(edital)
@@ -399,7 +399,7 @@ class EditalService:
         if not edital:
             raise HTTPException(status_code=404, detail="Edital não encontrado")
         edital.status = "draft"
-        edital.updated_at = datetime.utcnow()
+        edital.updated_at = datetime.now(timezone.utc)
         session.add(edital)
         session.commit()
         session.refresh(edital)

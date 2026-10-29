@@ -52,8 +52,8 @@ export const LicitacaoForm: React.FC = () => {
 
   // 1. Descritor & Vínculo com Edital
   const [editalId, setEditalId] = useState<number | undefined>(undefined);
-  const [municipio, setMunicipio] = useState<number>(7107);
-  const [entidade, setEntidade] = useState<number>(10048);
+  const [municipio, setMunicipio] = useState<number>(7071);
+  const [entidade, setEntidade] = useState<number>(11310);
   const [codigoEdital, setCodigoEdital] = useState<string>('');
   const [retificacao, setRetificacao] = useState<boolean>(false);
   const [numeroCompra, setNumeroCompra] = useState<string>('');
@@ -198,9 +198,32 @@ export const LicitacaoForm: React.FC = () => {
   const isSent = licitacaoStatus === 'sent';
 
   // Seleção e preenchimento a partir do Edital
-  const handleSelecionarEdital = (edId: number) => {
-    const ed = editaisDisponiveis.find(e => e.id === edId);
+  const handleSelecionarEdital = async (edId: number) => {
+    let ed = editaisDisponiveis.find(e => e.id === edId);
     if (!ed) return;
+
+    // Se o edital da lista não tiver parsed_documento ou documento_json parseado, busca o completo
+    let docEdital: any = ed.parsed_documento;
+    if (!docEdital && ed.documento_json) {
+      try {
+        docEdital = typeof ed.documento_json === 'string' ? JSON.parse(ed.documento_json) : ed.documento_json;
+      } catch {
+        docEdital = null;
+      }
+    }
+
+    if (!docEdital) {
+      try {
+        const edCompleto = await editalService.getEdital(edId);
+        if (edCompleto) {
+          ed = edCompleto;
+          docEdital = edCompleto.parsed_documento || (edCompleto.documento_json ? JSON.parse(edCompleto.documento_json) : null);
+        }
+      } catch (err) {
+        console.warn('Não foi possível obter detalhes complementares do edital:', err);
+      }
+    }
+
     setEditalId(ed.id);
     setMunicipio(ed.municipio);
     setEntidade(ed.entidade);
@@ -210,21 +233,31 @@ export const LicitacaoForm: React.FC = () => {
     setNumeroProcesso(ed.numero_processo || '');
     setObjetoEdital(ed.objeto_compra || '');
 
-    // Se a licitação ainda não tiver itens e o edital tiver itens, popula automaticamente
-    if (itens.length === 0 && ed.parsed_documento?.itensCompra?.length) {
-      const novosItens: ItemLicitacao[] = ed.parsed_documento.itensCompra.map((it) => ({
-        numeroItem: it.numeroItem,
-        tipoOrcamento: 1,
-        valor: it.valorTotal,
-        dataOrcamento: new Date().toISOString().split('T')[0],
-        situacaoCompraItemId: 2, // Homologado
-        dataSituacaoItem: new Date().toISOString().split('T')[0],
-        tipoValor: 'M',
-        tipoProposta: 1,
-        licitantes: []
-      }));
-      setItens(novosItens);
-      toast.success(`${novosItens.length} itens do edital importados para a licitação.`);
+    // Importa automaticamente os itens do edital para a seção 4 (Julgamento de Itens)
+    const itensCompra = docEdital?.itensCompra || [];
+    if (itensCompra.length > 0) {
+      const confirmImport = itens.length === 0 || window.confirm(
+        `O edital selecionado possui ${itensCompra.length} item(ns). Deseja preencher a Seção 4 (Julgamento de Itens) com estes itens?`
+      );
+
+      if (confirmImport) {
+        const novosItens: ItemLicitacao[] = itensCompra.map((it: any) => ({
+          numeroItem: Number(it.numeroItem),
+          tipoOrcamento: 1, // Global
+          valor: it.valorTotal || it.valorUnitarioEstimado || 0,
+          dataOrcamento: docEdital?.descritor?.dataDocumento || new Date().toISOString().split('T')[0],
+          situacaoCompraItemId: 2, // 2-Homologado
+          dataSituacaoItem: new Date().toISOString().split('T')[0],
+          tipoValor: 'M', // M-Monetário
+          tipoProposta: 1, // 1-Global
+          licitantes: []
+        }));
+        setItens(novosItens);
+        setSelectedItemIdx(0);
+        toast.success(`${novosItens.length} item(ns) do edital importado(s) com sucesso para a Seção 4!`);
+      }
+    } else {
+      toast('Edital vinculado, mas ele não possui itens cadastrados.', { icon: 'ℹ️' });
     }
   };
 
@@ -579,52 +612,12 @@ export const LicitacaoForm: React.FC = () => {
       <PageHeader 
         title={isSent ? 'Licitação Transmitida (Fase IV)' : id ? 'Editar Licitação' : 'Nova Licitação (Fase IV)'}
         actions={
-          <div className="d-flex align-items-center gap-2">
-            <button 
-              onClick={() => navigate('/licitacoes')}
-              className="btn btn-outline-light btn-sm d-flex align-items-center gap-1"
-            >
-              <ArrowLeft size={16} /> Voltar à Lista
-            </button>
-
-            {!isSent ? (
-              <>
-                <button
-                  onClick={handleSalvarRascunho}
-                  disabled={saving || sending}
-                  className="btn btn-light text-success fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
-                >
-                  <Save size={16} /> {saving ? 'Salvando...' : 'Salvar Rascunho'}
-                </button>
-
-                <button
-                  onClick={handleEnviarAudesp}
-                  disabled={saving || sending}
-                  className="btn btn-warning text-dark fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
-                >
-                  <Send size={16} /> {sending ? 'Transmitindo...' : 'Transmitir à AUDESP'}
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={handleConsultarProtocolo}
-                  disabled={sending}
-                  className="btn btn-light text-primary fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
-                >
-                  <RefreshCw size={16} className={sending ? 'spin' : ''} /> Atualizar Status
-                </button>
-                {statusProtocolo?.toLowerCase().includes('rejeitado') && (
-                  <button
-                    onClick={handleRetornarRascunho}
-                    className="btn btn-warning text-dark fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
-                  >
-                    <RotateCcw size={16} /> Corrigir e Reenviar
-                  </button>
-                )}
-              </>
-            )}
-          </div>
+          <button 
+            onClick={() => navigate('/licitacoes')}
+            className="btn btn-outline-light btn-sm d-flex align-items-center gap-1"
+          >
+            <ArrowLeft size={16} /> Voltar à Lista
+          </button>
         }
       />
 
@@ -1218,6 +1211,63 @@ export const LicitacaoForm: React.FC = () => {
           </div>
         )}
       </Card>
+
+      {/* Botões de Ação no Final do Formulário */}
+      <div className="card shadow-sm border-0 mt-4 p-3 bg-white">
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <button
+            type="button"
+            onClick={() => navigate('/licitacoes')}
+            className="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1"
+          >
+            <ArrowLeft size={16} /> Voltar à Lista
+          </button>
+
+          <div className="d-flex align-items-center gap-2">
+            {!isSent ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleSalvarRascunho}
+                  disabled={saving || sending}
+                  className="btn btn-outline-success fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                >
+                  <Save size={16} /> {saving ? 'Salvando...' : 'Salvar Rascunho'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleEnviarAudesp}
+                  disabled={saving || sending}
+                  className="btn btn-warning text-dark fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                >
+                  <Send size={16} /> {sending ? 'Transmitindo...' : 'Transmitir à AUDESP'}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={handleConsultarProtocolo}
+                  disabled={sending}
+                  className="btn btn-outline-primary fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                >
+                  <RefreshCw size={16} className={sending ? 'spin' : ''} /> Atualizar Status
+                </button>
+                {statusProtocolo?.toLowerCase().includes('rejeitado') && (
+                  <button
+                    type="button"
+                    onClick={handleRetornarRascunho}
+                    className="btn btn-warning text-dark fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                  >
+                    <RotateCcw size={16} /> Corrigir e Reenviar
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* Modal: Item da Licitação */}
       {showItemModal && (

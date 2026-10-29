@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from typing import Dict, List, Any
 
 # Domínio AUDESP: Tri-State genérico (1-Sim, 2-Não, 3-Não se aplica)
@@ -44,7 +45,6 @@ DOMINIO_FONTES_RECURSO = {
     6: "6 – Outras Fontes de Recursos",
     7: "7 – Operações de Crédito",
     8: "8 – Emendas Parlamentares Individuais - Legislativo Municipal",
-    19: "19 – Recursos Extraorçamentários",
     91: "91 – Tesouro - Exercícios Anteriores",
     92: "92 – Transferências e Convênios Estaduais - Vinculados - Exercícios Anteriores",
     93: "93 – Recursos Próprios de Fundos Especiais de Despesa - Exercícios Anteriores",
@@ -52,8 +52,7 @@ DOMINIO_FONTES_RECURSO = {
     95: "95 – Transferências e Convênios Federais - Exercícios Anteriores",
     96: "96 – Outras Fontes de Recursos - Exercícios Anteriores",
     97: "97 – Operações de Crédito - Exercícios Anteriores",
-    98: "98 – Emendas Parlamentares Individuais - Exercícios Anteriores",
-    99: "99 – Não foi emitida declaração de existência de recursos"
+    98: "98 – Emendas Parlamentares Individuais - Exercícios Anteriores"
 }
 
 # Domínio AUDESP: Índice Econômico
@@ -219,20 +218,29 @@ def validar_regras_negocio_licitacao(doc: Dict[str, Any]) -> List[str]:
 
             # Tipo de orçamento e valor
             t_orc = item.get("tipoOrcamento")
-            if t_orc is None:
-                erros.append(f"Item {idx}: 'tipoOrcamento' é obrigatório.")
-            elif t_orc != 0:
-                if item.get("valor") is None or float(item.get("valor")) < 0:
-                    erros.append(f"Item {idx}: Quando tipoOrcamento <> 0, o 'valor' orçado é obrigatório.")
-                if not item.get("dataOrcamento"):
-                    erros.append(f"Item {idx}: Quando tipoOrcamento <> 0, a 'dataOrcamento' é obrigatória.")
+            val_orc = item.get("valor")
+            if t_orc is not None and t_orc != 0 and val_orc is None:
+                erros.append(f"Item {idx}: Quando tipoOrcamento <> 0, informe o 'valor' orçado.")
+            if val_orc is not None and not item.get("dataOrcamento"):
+                erros.append(f"Item {idx}: Quando houver valor do orçamento informado, 'dataOrcamento' é obrigatória.")
 
             # Situação do item
             sit = item.get("situacaoCompraItemId")
             if not sit:
                 erros.append(f"Item {idx}: 'situacaoCompraItemId' é obrigatório.")
-            if not item.get("dataSituacaoItem"):
+            dt_sit_str = item.get("dataSituacaoItem")
+            if not dt_sit_str:
                 erros.append(f"Item {idx}: 'dataSituacaoItem' é obrigatória.")
+            else:
+                try:
+                    dt_sit = datetime.strptime(str(dt_sit_str).split("T")[0], "%Y-%m-%d").date()
+                    hoje = datetime.now().date()
+                    if dt_sit > hoje:
+                        erros.append(f"Item {idx}: 'dataSituacaoItem' não pode ser posterior à data de hoje.")
+                    elif dt_sit.year < (hoje.year - 30):
+                        erros.append(f"Item {idx}: 'dataSituacaoItem' deve estar compreendida nos últimos 30 anos.")
+                except ValueError:
+                    erros.append(f"Item {idx}: 'dataSituacaoItem' em formato inválido.")
 
             # Tipo valor e tipo proposta
             t_val = item.get("tipoValor")
@@ -254,7 +262,13 @@ def validar_regras_negocio_licitacao(doc: Dict[str, Any]) -> List[str]:
             vencedores_count = 0
             for l_idx, lic in enumerate(licitantes, start=1):
                 t_pes = lic.get("tipoPessoaId")
-                ni = re.sub(r"\D", "", str(lic.get("niPessoa") or ""))
+                raw_ni = str(lic.get("niPessoa") or "").strip()
+                # Para PE (Pessoa Estrangeira), preserva caracteres alfanuméricos
+                if t_pes == "PE":
+                    ni = raw_ni
+                else:
+                    ni = re.sub(r"\D", "", raw_ni)
+
                 if t_pes not in ("PJ", "PF", "PE"):
                     erros.append(f"Item {idx}, Licitante {l_idx}: 'tipoPessoaId' deve ser 'PJ', 'PF' ou 'PE'.")
                 if not ni:
@@ -264,14 +278,19 @@ def validar_regras_negocio_licitacao(doc: Dict[str, Any]) -> List[str]:
                         erros.append(f"Item {idx}, Licitante {l_idx}: CNPJ deve ter 14 dígitos.")
                     elif t_pes == "PF" and len(ni) != 11:
                         erros.append(f"Item {idx}, Licitante {l_idx}: CPF deve ter 11 dígitos.")
+                    elif t_pes == "PE" and len(ni) < 3:
+                        erros.append(f"Item {idx}, Licitante {l_idx}: Identificação de pessoa estrangeira deve ter no mínimo 3 caracteres.")
                 
-                if t_pes == "PE" and not str(lic.get("nomeRazaoSocial") or "").strip():
+                nome_lic = str(lic.get("nomeRazaoSocial") or "").strip()
+                if t_pes == "PE" and not nome_lic:
                     erros.append(f"Item {idx}, Licitante {l_idx}: Para licitante Estrangeiro ('PE'), 'nomeRazaoSocial' é obrigatório.")
+                if nome_lic and len(nome_lic) > 100:
+                    erros.append(f"Item {idx}, Licitante {l_idx}: 'nomeRazaoSocial' deve ter no máximo 100 caracteres (schema 15/10/2026).")
 
                 # Unicidade por item
-                chave_lic = f"{t_pes}_{ni}"
+                chave_lic = f"{t_pes}_{ni.upper()}"
                 if chave_lic in licitantes_item_vistos:
-                    erros.append(f"Item {idx}: O licitante {chave_lic} foi informado mais de uma vez no mesmo item.")
+                    erros.append(f"Item {idx}: O licitante {t_pes} {ni} foi informado mais de uma vez no mesmo item.")
                 else:
                     licitantes_item_vistos.add(chave_lic)
 

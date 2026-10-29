@@ -1,8 +1,11 @@
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlmodel import SQLModel, Field
 from sqlalchemy import Column, Text, LargeBinary
 from sqlalchemy.dialects.mysql import LONGBLOB
+
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 class Edital(SQLModel, table=True):
     __tablename__ = "editais"
@@ -38,8 +41,8 @@ class Edital(SQLModel, table=True):
     # Documento JSON completo validado conforme edital_schema.json
     documento_json: str = Field(sa_column=Column(Text))
     
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=now_utc)
+    updated_at: datetime = Field(default_factory=now_utc)
 
 
 class EditalArquivo(SQLModel, table=True):
@@ -52,5 +55,5 @@ class EditalArquivo(SQLModel, table=True):
     tipo_mime: str = Field(default="application/pdf", max_length=100)
     tamanho: int = Field(default=0, description="Tamanho em bytes do arquivo")
     conteudo: bytes = Field(sa_column=Column(LargeBinary().with_variant(LONGBLOB, "mysql")), description="Binário do arquivo PDF")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=now_utc)
+    updated_at: datetime = Field(default_factory=now_utc)

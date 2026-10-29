@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Container, 
-  Row, 
-  Col, 
   ButtonGroup, 
   Button, 
   InputGroup, 
@@ -116,71 +114,80 @@ export const AtasList: React.FC = () => {
   };
 
   return (
-    <Container fluid className="p-4">
+    <Container fluid className="p-0">
       <PageHeader
         title="Atas de Registro de Preço (ARP)"
-        description="Gerenciamento e transmissão de Atas decorrentes de Licitações (Fase IV - TCESP)"
-        actions={
-          <Button
-            variant="primary"
-            onClick={() => navigate('/atas/novo')}
-            className="d-flex align-items-center gap-2"
-          >
-            <Plus size={18} />
-            <span>Nova Ata de Registro</span>
-          </Button>
-        }
       />
 
-      {/* Tabs e Barra de Busca com React-Bootstrap */}
-      <Row className="g-3 mb-4 align-items-center">
-        <Col xs="auto">
-          <ButtonGroup className="shadow-sm">
+      <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+        {/* Tabs com ButtonGroup e Botão Novo */}
+        <div className="d-flex align-items-center gap-3">
+          <ButtonGroup className="shadow-sm bg-white p-1 rounded">
             <Button
-              variant={tab === 'draft' ? 'primary' : 'outline-primary'}
+              size="sm"
+              variant={tab === 'draft' ? 'success' : 'light'}
+              className={`px-4 py-2 fw-medium ${tab === 'draft' ? 'text-white shadow-sm' : 'text-dark'}`}
               onClick={() => setTab('draft')}
             >
-              Rascunhos Locais
+              <Edit size={16} className="me-1 d-inline" /> Rascunhos Locais
             </Button>
             <Button
-              variant={tab === 'sent' ? 'primary' : 'outline-primary'}
+              size="sm"
+              variant={tab === 'sent' ? 'success' : 'light'}
+              className={`px-4 py-2 fw-medium ${tab === 'sent' ? 'text-white shadow-sm' : 'text-dark'}`}
               onClick={() => setTab('sent')}
             >
-              Transmitidas ao AUDESP
+              <CheckCircle2 size={16} className="me-1 d-inline" /> Enviados ao AUDESP
             </Button>
           </ButtonGroup>
-        </Col>
 
-        <Col>
-          <Form onSubmit={handleSearchSubmit} className="d-flex gap-2">
-            <InputGroup>
-              <InputGroup.Text className="bg-white">
-                <Search size={16} className="text-muted" />
-              </InputGroup.Text>
-              <Form.Control
-                type="text"
-                placeholder="Buscar por número da ata, código do edital ou protocolo..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </InputGroup>
-            <Button type="submit" variant="outline-secondary">
-              Buscar
-            </Button>
-          </Form>
-        </Col>
-
-        <Col xs="auto">
           <Button
-            variant="outline-secondary"
+            variant="success"
+            size="sm"
+            onClick={() => navigate('/atas/novo')}
+            className="fw-bold d-flex align-items-center gap-2 shadow-sm py-2 px-3"
+          >
+            <Plus size={18} /> Nova Ata de Registro
+          </Button>
+        </div>
+
+        {/* Busca com Form e InputGroup */}
+        <Form onSubmit={handleSearchSubmit} className="d-flex align-items-center gap-2">
+          <InputGroup size="sm" style={{ width: '340px' }}>
+            <InputGroup.Text className="bg-white border-end-0">
+              <Search size={16} className="text-muted" />
+            </InputGroup.Text>
+            <Form.Control
+              type="text"
+              className="border-start-0 ps-0"
+              placeholder="Buscar por número da ata, edital, protocolo..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <Button
+                variant="outline-secondary"
+                onClick={() => { setSearch(''); carregarAtas(); }}
+              >
+                ×
+              </Button>
+            )}
+            <Button type="submit" variant="outline-success">
+              Filtrar
+            </Button>
+          </InputGroup>
+
+          <Button
+            variant="light"
+            size="sm"
             onClick={carregarAtas}
-            className="d-flex align-items-center gap-1"
+            className="border shadow-sm text-secondary p-2"
             title="Atualizar lista"
           >
             <RefreshCw size={16} />
           </Button>
-        </Col>
-      </Row>
+        </Form>
+      </div>
 
       {/* Tabela com React-Bootstrap */}
       <CardBox>
@@ -191,8 +198,25 @@ export const AtasList: React.FC = () => {
           </div>
         ) : atas.length === 0 ? (
           <div className="text-center py-5 text-muted">
-            <Layers size={40} className="mb-2 opacity-25" />
-            <p className="mb-0">Nenhuma ata de registro de preços encontrada nesta aba.</p>
+            <Layers size={48} className="mb-3 opacity-25" />
+            <h5 className="text-secondary fw-semibold">
+              {search ? 'Nenhuma ata encontrada para o filtro' : tab === 'draft' ? 'Nenhum rascunho de ata de registro' : 'Nenhuma ata enviada ao AUDESP'}
+            </h5>
+            <p className="text-muted small mb-3">
+              {tab === 'draft'
+                ? 'Clique no botão "+ Nova Ata de Registro" acima para vincular itens de um edital ou cadastrar uma ARP.'
+                : 'As atas transmitidas com sucesso para a API do AUDESP aparecerão nesta aba.'}
+            </p>
+            {tab === 'draft' && (
+              <Button
+                variant="success"
+                size="sm"
+                onClick={() => navigate('/atas/novo')}
+                className="mt-1"
+              >
+                Cadastrar Primeira Ata
+              </Button>
+            )}
           </div>
         ) : (
           <Table responsive hover className="align-middle mb-0">
@@ -261,17 +285,18 @@ export const AtasList: React.FC = () => {
                           <Button
                             variant="outline-primary"
                             onClick={() => navigate(`/atas/${ata.id}`)}
+                            disabled={actionLoadingId === ata.id}
                             title="Editar rascunho"
                           >
-                            <Edit size={14} />
+                            <Edit size={14} className="me-1" /> Editar
                           </Button>
                           <Button
-                            variant="outline-success"
+                            variant="success"
                             onClick={() => handleEnviar(ata.id, ata.numero_ata_registro_preco)}
                             disabled={actionLoadingId === ata.id}
                             title="Transmitir para o AUDESP"
                           >
-                            <Send size={14} />
+                            <Send size={14} className="me-1" /> Transmitir
                           </Button>
                         </>
                       ) : (
@@ -283,7 +308,7 @@ export const AtasList: React.FC = () => {
                               disabled={actionLoadingId === ata.id}
                               title="Consultar status no TCESP"
                             >
-                              <RefreshCw size={14} className={actionLoadingId === ata.id ? 'spin' : ''} />
+                              <RefreshCw size={14} className={`me-1 ${actionLoadingId === ata.id ? 'spin' : ''}`} /> Consultar Protocolo
                             </Button>
                           )}
                           <Button
@@ -292,7 +317,7 @@ export const AtasList: React.FC = () => {
                             disabled={actionLoadingId === ata.id}
                             title="Reabrir para rascunho"
                           >
-                            <RotateCcw size={14} />
+                            <RotateCcw size={14} className="me-1" /> Destravar
                           </Button>
                         </>
                       )}

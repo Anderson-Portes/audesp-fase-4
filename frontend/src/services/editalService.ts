@@ -63,8 +63,7 @@ export const editalService = {
   },
 
   getPdfUrl(id: number): string {
-    const baseURL = api.defaults.baseURL || 'http://localhost:8000';
-    return `${baseURL}/api/editais/${id}/pdf`;
+    return `${api.defaults.baseURL}/api/editais/${id}/pdf`;
   },
 
   async downloadPdf(id: number): Promise<Blob> {

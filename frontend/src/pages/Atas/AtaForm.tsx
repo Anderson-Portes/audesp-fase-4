@@ -17,8 +17,11 @@ import {
   Send, 
   ArrowLeft, 
   CheckSquare, 
-  Square,
-  AlertCircle
+  Square, 
+  AlertCircle,
+  RefreshCw,
+  RotateCcw,
+  CheckCircle2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -37,15 +40,22 @@ export const AtaForm: React.FC = () => {
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState(false);
   const [editais, setEditais] = useState<Edital[]>([]);
   const [selectedEdital, setSelectedEdital] = useState<any>(null);
   const [municipiosList, setMunicipiosList] = useState<MunicipioAudesp[]>([]);
   const [entidadesList, setEntidadesList] = useState<EntidadeAudesp[]>([]);
 
+  // Status de Transmissão / Protocolo
+  const [ataStatus, setAtaStatus] = useState<'draft' | 'sent' | 'error'>('draft');
+  const [protocolo, setProtocolo] = useState<string | null>(null);
+  const [statusProtocolo, setStatusProtocolo] = useState<string | null>(null);
+  const [detalhesProtocolo, setDetalhesProtocolo] = useState<any>(null);
+
   // Form State
   const [editalId, setEditalId] = useState<number | ''>('');
-  const [municipio, setMunicipio] = useState<number>(7107);
-  const [entidade, setEntidade] = useState<number>(10048);
+  const [municipio, setMunicipio] = useState<number>(7071);
+  const [entidade, setEntidade] = useState<number>(11310);
   const [codigoEdital, setCodigoEdital] = useState('');
   const [codigoAta, setCodigoAta] = useState('');
   const [anoCompra, setAnoCompra] = useState<number>(new Date().getFullYear());
@@ -96,6 +106,14 @@ export const AtaForm: React.FC = () => {
 
           setNumeroAtaRegistroPreco(ata.numero_ata_registro_preco);
           setAnoAta(ata.ano_ata);
+          setAtaStatus(ata.status as any || 'draft');
+          setProtocolo(ata.protocolo || null);
+          setStatusProtocolo(ata.status_protocolo || null);
+          try {
+            setDetalhesProtocolo(ata.detalhes_protocolo ? JSON.parse(ata.detalhes_protocolo) : null);
+          } catch {
+            setDetalhesProtocolo(null);
+          }
           setDataAssinatura(ata.data_assinatura ? String(ata.data_assinatura).split('T')[0] : '');
           setDataVigenciaInicio(ata.data_vigencia_inicio ? String(ata.data_vigencia_inicio).split('T')[0] : '');
           setDataVigenciaFim(ata.data_vigencia_fim ? String(ata.data_vigencia_fim).split('T')[0] : '');
@@ -172,6 +190,10 @@ export const AtaForm: React.FC = () => {
       toast.error('Informe o Número da Ata de Registro de Preço.');
       return;
     }
+    if (numeroAtaRegistroPreco.trim().length > 30) {
+      toast.error('O Número da Ata de Registro de Preço não pode exceder 30 caracteres.');
+      return;
+    }
     if (!anoAta) {
       toast.error('Informe o Ano da Ata.');
       return;
@@ -190,6 +212,10 @@ export const AtaForm: React.FC = () => {
     }
 
     const codAtaFinal = codigoAta || `ATA-${numeroAtaRegistroPreco}/${anoAta}`;
+    if (codAtaFinal.trim().length > 31) {
+      toast.error('Código único da Ata (codigoAta) deve ter no máximo 31 caracteres.');
+      return;
+    }
 
     const documentoJSON = {
       descritor: {
@@ -220,9 +246,11 @@ export const AtaForm: React.FC = () => {
       toast.success(isEditing ? 'Ata atualizada com sucesso!' : 'Ata criada com sucesso!');
 
       if (transmitirAposSalvar) {
+        setSending(true);
         toast.loading('Transmitindo para o AUDESP...', { id: 'transmissao' });
         const resEnvio = await ataService.enviarAta(resAta.id);
         toast.dismiss('transmissao');
+        setSending(false);
         if (resEnvio.sucesso) {
           toast.success(`Ata transmitida! Protocolo: ${resEnvio.protocolo}`);
           navigate('/atas');
@@ -231,13 +259,52 @@ export const AtaForm: React.FC = () => {
           navigate(`/atas/${resAta.id}`);
         }
       } else {
-        navigate('/atas');
+        if (!isEditing) {
+          navigate(`/atas/${resAta.id}`);
+        }
       }
     } catch (err: any) {
       const msg = err.response?.data?.detail || 'Erro ao salvar ata.';
       toast.error(msg);
     } finally {
       setSaving(false);
+      setSending(false);
+    }
+  };
+
+  const handleConsultarProtocolo = async () => {
+    if (!id) return;
+    try {
+      setSending(true);
+      const res = await ataService.consultarProtocolo(Number(id));
+      if (res.sucesso) {
+        setStatusProtocolo(res.status);
+        setDetalhesProtocolo(res.detalhes);
+        toast.success(`Status atualizado: ${res.status}`);
+      } else {
+        toast.error(res.mensagem || 'Erro ao consultar protocolo.');
+      }
+    } catch {
+      toast.error('Falha ao consultar protocolo no AUDESP');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleRetornarRascunho = async () => {
+    if (!id) return;
+    if (!window.confirm('Deseja retornar esta ata para rascunho para corrigir eventuais dados?')) {
+      return;
+    }
+    try {
+      setLoading(true);
+      await ataService.retornarRascunho(Number(id));
+      setAtaStatus('draft');
+      toast.success('Ata retornada para rascunho com sucesso!');
+    } catch {
+      toast.error('Erro ao retornar ata para rascunho');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -250,44 +317,49 @@ export const AtaForm: React.FC = () => {
     );
   }
 
+  const isSent = ataStatus === 'sent';
   const itensCompra = selectedEdital?.parsed_documento?.itensCompra || selectedEdital?.documento?.itensCompra;
 
   return (
-    <Container fluid className="p-4">
+    <Container fluid className="p-0 pb-5">
       <PageHeader
-        title={isEditing ? `Editar Ata: ${numeroAtaRegistroPreco}/${anoAta}` : 'Nova Ata de Registro de Preço (ARP)'}
-        description="Formulário para emissão e transmissão de Ata (Fase IV AUDESP / TCESP)"
+        title={isSent ? 'Ata Transmitida (Fase IV)' : id ? `Editar Ata: ${numeroAtaRegistroPreco}/${anoAta}` : 'Nova Ata de Registro de Preço (ARP)'}
         actions={
-          <div className="d-flex gap-2">
-            <Button
-              variant="outline-secondary"
-              onClick={() => navigate('/atas')}
-              className="d-flex align-items-center gap-1"
-            >
-              <ArrowLeft size={16} />
-              <span>Voltar</span>
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => handleSalvar(false)}
-              disabled={saving}
-              className="d-flex align-items-center gap-1"
-            >
-              <Save size={16} />
-              <span>Salvar Rascunho</span>
-            </Button>
-            <Button
-              variant="success"
-              onClick={() => handleSalvar(true)}
-              disabled={saving}
-              className="d-flex align-items-center gap-1"
-            >
-              <Send size={16} />
-              <span>Salvar e Transmitir</span>
-            </Button>
-          </div>
+          <button
+            onClick={() => navigate('/atas')}
+            className="btn btn-outline-light btn-sm d-flex align-items-center gap-1"
+          >
+            <ArrowLeft size={16} /> Voltar à Lista
+          </button>
         }
       />
+
+      {/* Protocol Banner if Sent */}
+      {isSent && (
+        <div className={`alert ${statusProtocolo?.toLowerCase().includes('rejeitado') ? 'alert-danger' : 'alert-success'} d-flex justify-content-between align-items-center shadow-sm mb-4`}>
+          <div>
+            <h5 className="alert-heading mb-1 d-flex align-items-center gap-2">
+              <CheckCircle2 size={20} /> Protocolo AUDESP: <strong>{protocolo}</strong>
+            </h5>
+            <p className="mb-0 small">
+              Situação no Tribunal de Contas: <strong>{statusProtocolo || 'Recebido'}</strong>
+            </p>
+            {detalhesProtocolo?.erros?.length > 0 && (
+              <div className="mt-2 pt-2 border-top border-danger-subtle small">
+                <strong>Erros / Notificações do TCESP:</strong>
+                <ul className="mb-0 ps-3 mt-1">
+                  {detalhesProtocolo.erros.map((err: any, idx: number) => (
+                    <li key={idx}>{err.mensagem || err.campo || JSON.stringify(err)}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+          <span className="badge bg-white text-dark fs-6 px-3 py-2 border">
+            Fase IV — TCESP
+          </span>
+        </div>
+      )}
 
       <Row className="g-4">
         {/* Coluna 1: Dados do Descritor e Vinculação com Form Controls de React-Bootstrap */}
@@ -543,6 +615,63 @@ export const AtaForm: React.FC = () => {
           </CardBox>
         </Col>
       </Row>
+
+      {/* Botões de Ação no Final do Formulário */}
+      <div className="card shadow-sm border-0 mt-4 p-3 bg-white">
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <button
+            type="button"
+            onClick={() => navigate('/atas')}
+            className="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1"
+          >
+            <ArrowLeft size={16} /> Voltar à Lista
+          </button>
+
+          <div className="d-flex align-items-center gap-2">
+            {!isSent ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleSalvar(false)}
+                  disabled={saving || sending}
+                  className="btn btn-outline-success fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                >
+                  <Save size={16} /> {saving ? 'Salvando...' : 'Salvar Rascunho'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSalvar(true)}
+                  disabled={saving || sending}
+                  className="btn btn-warning text-dark fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                >
+                  <Send size={16} /> {sending ? 'Transmitindo...' : 'Transmitir à AUDESP'}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={handleConsultarProtocolo}
+                  disabled={sending}
+                  className="btn btn-outline-primary fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                >
+                  <RefreshCw size={16} className={sending ? 'spin' : ''} /> Atualizar Status
+                </button>
+                {statusProtocolo?.toLowerCase().includes('rejeitado') && (
+                  <button
+                    type="button"
+                    onClick={handleRetornarRascunho}
+                    className="btn btn-warning text-dark fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                  >
+                    <RotateCcw size={16} /> Corrigir e Reenviar
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
     </Container>
   );
 };

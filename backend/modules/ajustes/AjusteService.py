@@ -1,6 +1,6 @@
 import json
 from typing import Optional, List, Dict, Any
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 
 from fastapi import HTTPException
 from sqlmodel import Session, select, or_
@@ -12,8 +12,11 @@ from modules.ajustes.AjusteDomains import (
     DOMINIO_TIPO_CONTRATO,
     DOMINIO_CATEGORIA_PROCESSO,
     DOMINIO_TIPO_OBJETO_CONTRATO,
+    OBJETOS_POR_CATEGORIA,
     validar_regras_negocio_ajuste
 )
+from modules.licitacoes.Licitacao import Licitacao
+from modules.editais.Edital import Edital
 
 
 class AjusteService:
@@ -26,6 +29,7 @@ class AjusteService:
             "tiposContrato": DOMINIO_TIPO_CONTRATO,
             "categoriasProcesso": DOMINIO_CATEGORIA_PROCESSO,
             "tiposObjetoContrato": DOMINIO_TIPO_OBJETO_CONTRATO,
+            "objetosPorCategoria": OBJETOS_POR_CATEGORIA,
             "municipios": MUNICIPIOS_AUDESP,
             "entidades": ENTIDADES_AUDESP
         }
@@ -90,7 +94,7 @@ class AjusteService:
             except Exception:
                 return None
 
-        dt_assinatura = parse_date(documento.get("dataAssinatura")) or datetime.utcnow().date()
+        dt_assinatura = parse_date(documento.get("dataAssinatura")) or datetime.now(timezone.utc).date()
         dt_inicio = parse_date(documento.get("dataVigenciaInicio"))
         dt_fim = parse_date(documento.get("dataVigenciaFim"))
 
@@ -157,7 +161,7 @@ class AjusteService:
             ajuste.data_vigencia_inicio = dt_inicio
             ajuste.data_vigencia_fim = dt_fim
             ajuste.documento_json = json.dumps(documento, ensure_ascii=False)
-            ajuste.updated_at = datetime.utcnow()
+            ajuste.updated_at = datetime.now(timezone.utc)
 
         session.commit()
         session.refresh(ajuste)
@@ -180,16 +184,49 @@ class AjusteService:
         except Exception:
             raise HTTPException(status_code=400, detail="JSON do ajuste está corrompido.")
 
-        erros_validacao = validar_regras_negocio_ajuste(documento)
+        # Verifica se o edital vinculado é SRP
+        is_srp = False
+        if ajuste.edital_id:
+            edital_vinculado = session.get(Edital, ajuste.edital_id)
+            if edital_vinculado and edital_vinculado.documento_json:
+                try:
+                    ed_doc = json.loads(edital_vinculado.documento_json)
+                    is_srp = bool(ed_doc.get("srp", False))
+                except Exception:
+                    pass
+
+        erros_validacao = validar_regras_negocio_ajuste(documento, edital_srp=is_srp)
+
+        # Cross-validation com Licitacao vinculada (dispensada em adesão/participação externa)
+        adesao = documento.get("descritor", {}).get("adesaoParticipacao", False)
+        if not adesao and ajuste.licitacao_id:
+            licitacao = session.get(Licitacao, ajuste.licitacao_id)
+            if licitacao and licitacao.documento_json:
+                try:
+                    lic_doc = json.loads(licitacao.documento_json)
+                    lic_itens = {str(item.get("numeroItem")) for item in lic_doc.get("item", []) if item.get("numeroItem") is not None}
+                    ajuste_itens = [str(item.get("numeroItem")) for item in documento.get("itens", []) if item.get("numeroItem") is not None]
+                    for item_num in ajuste_itens:
+                        if item_num not in lic_itens:
+                            erros_validacao.append(f"O item '{item_num}' do ajuste não existe na licitação vinculada.")
+                except Exception:
+                    pass
+
         if erros_validacao and not forcar:
             raise HTTPException(
                 status_code=422,
                 detail={"mensagem": "O ajuste possui inconsistências com o schema AUDESP.", "erros": erros_validacao}
             )
 
+        # Remove campos de vigência com string vazia antes de serializar/enviar
+        payload_ajuste = dict(documento)
+        for campo_data in ["dataVigenciaInicio", "dataVigenciaFim"]:
+            if campo_data in payload_ajuste and not payload_ajuste[campo_data]:
+                del payload_ajuste[campo_data]
+
         resultado = enviar_ajuste_audesp(
             token=token_audesp,
-            documento_json=ajuste.documento_json
+            documento_json=json.dumps(payload_ajuste, ensure_ascii=False)
         )
 
         if resultado.get("sucesso"):
@@ -197,7 +234,7 @@ class AjusteService:
             ajuste.protocolo = resultado.get("protocolo")
             ajuste.status_protocolo = "Recebido"
             ajuste.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
-            ajuste.updated_at = datetime.utcnow()
+            ajuste.updated_at = datetime.now(timezone.utc)
             session.commit()
             session.refresh(ajuste)
             return {
@@ -209,7 +246,7 @@ class AjusteService:
         else:
             ajuste.status = "error"
             ajuste.detalhes_protocolo = json.dumps(resultado, ensure_ascii=False)
-            ajuste.updated_at = datetime.utcnow()
+            ajuste.updated_at = datetime.now(timezone.utc)
             session.commit()
             return {
                 "sucesso": False,
@@ -234,7 +271,7 @@ class AjusteService:
             novo_status = resultado.get("status")
             ajuste.status_protocolo = novo_status
             ajuste.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
-            ajuste.updated_at = datetime.utcnow()
+            ajuste.updated_at = datetime.now(timezone.utc)
             session.commit()
             session.refresh(ajuste)
             return {
@@ -256,7 +293,7 @@ class AjusteService:
         if not ajuste:
             raise HTTPException(status_code=404, detail="Ajuste não encontrado.")
         ajuste.status = "draft"
-        ajuste.updated_at = datetime.utcnow()
+        ajuste.updated_at = datetime.now(timezone.utc)
         session.commit()
         session.refresh(ajuste)
         return ajuste

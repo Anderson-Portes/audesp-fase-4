@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { 
-  ArrowLeft, 
-  Save, 
-  Send, 
-  Upload, 
-  FileText, 
-  Plus, 
-  Trash2, 
-  Edit2, 
-  AlertTriangle, 
-  CheckCircle2, 
-  RefreshCw, 
+import {
+  ArrowLeft,
+  Save,
+  Send,
+  Upload,
+  FileText,
+  Plus,
+  Trash2,
+  Edit2,
+  AlertTriangle,
+  CheckCircle2,
+  RefreshCw,
   RotateCcw
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -21,18 +21,18 @@ import { PageHeader } from '../../components/PageHeader/PageHeader';
 import { CardBox as Card } from '../../components/CardBox/CardBox';
 import { MunicipioEntidadeSelect } from '../../components/MunicipioEntidadeSelect/MunicipioEntidadeSelect';
 import { editalService } from '../../services/editalService';
-import type { 
-  Edital, 
-  Publicacao, 
-  ItemCompra, 
-  DominiosResponse 
+import type {
+  Edital,
+  Publicacao,
+  ItemCompra,
+  DominiosResponse
 } from '../../types/edital';
-import { 
-  formatBRL, 
-  formatDecimal4, 
-  formatDateBR, 
-  formatPncpMask, 
-  stripMask 
+import {
+  formatBRL,
+  formatDecimal4,
+  formatDateBR,
+  formatPncpMask,
+  stripMask
 } from '../../utils/formatters';
 
 export const EditalForm: React.FC = () => {
@@ -52,8 +52,8 @@ export const EditalForm: React.FC = () => {
   const [detalhesProtocolo, setDetalhesProtocolo] = useState<any>(null);
 
   // 1. Descritor
-  const [municipio, setMunicipio] = useState<number>(7107);
-  const [entidade, setEntidade] = useState<number>(10048);
+  const [municipio, setMunicipio] = useState<number>(7071);
+  const [entidade, setEntidade] = useState<number>(11310);
   const [semPncp, setSemPncp] = useState<boolean>(false);
   const [codigoEdital, setCodigoEdital] = useState<string>('');
   const [dataDocumento, setDataDocumento] = useState<string>(
@@ -87,6 +87,7 @@ export const EditalForm: React.FC = () => {
   const [dataAberturaProposta, setDataAberturaProposta] = useState<string>('');
   const [dataEncerramentoProposta, setDataEncerramentoProposta] = useState<string>('');
   const [amparoLegalId, setAmparoLegalId] = useState<number>(1); // Pregão
+  const [buscaAmparo, setBuscaAmparo] = useState<string>('');
   const [linkSistemaOrigem, setLinkSistemaOrigem] = useState<string>('');
   const [justificativaPresencial, setJustificativaPresencial] = useState<string>('');
 
@@ -137,8 +138,8 @@ export const EditalForm: React.FC = () => {
           const doc = edital.parsed_documento;
           if (doc) {
             if (doc.descritor) {
-              setMunicipio(doc.descritor.municipio || 7107);
-              setEntidade(doc.descritor.entidade || 10048);
+              setMunicipio(doc.descritor.municipio || 7071);
+              setEntidade(doc.descritor.entidade || 11310);
               setCodigoEdital(doc.descritor.codigoEdital || edital.codigo_edital);
               setDataDocumento(doc.descritor.dataDocumento || '');
               setRetificacao(doc.descritor.retificacao || false);
@@ -239,7 +240,7 @@ export const EditalForm: React.FC = () => {
         if (p.veiculoPublicacao === 5 && p.idContratacaoPNCP) {
           pubObj.idContratacaoPNCP = stripMask(p.idContratacaoPNCP);
         }
-        if (p.veiculoPublicacao === 10 && p.veiculoPublicacaoNome) {
+        if (p.veiculoPublicacaoNome?.trim()) {
           pubObj.veiculoPublicacaoNome = p.veiculoPublicacaoNome.trim();
         }
         return pubObj;
@@ -587,55 +588,15 @@ export const EditalForm: React.FC = () => {
 
   return (
     <Container fluid className="p-0 pb-5">
-      <PageHeader 
+      <PageHeader
         title={isSent ? 'Edital Transmitido (Fase IV)' : id ? 'Editar Edital' : 'Novo Edital (Fase IV)'}
         actions={
-          <div className="d-flex align-items-center gap-2">
-            <button 
-              onClick={() => navigate('/editais')}
-              className="btn btn-outline-light btn-sm d-flex align-items-center gap-1"
-            >
-              <ArrowLeft size={16} /> Voltar à Lista
-            </button>
-
-            {!isSent ? (
-              <>
-                <button
-                  onClick={handleSalvarRascunho}
-                  disabled={saving || sending}
-                  className="btn btn-light text-success fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
-                >
-                  <Save size={16} /> {saving ? 'Salvando...' : 'Salvar Rascunho'}
-                </button>
-
-                <button
-                  onClick={handleEnviarAudesp}
-                  disabled={saving || sending}
-                  className="btn btn-warning text-dark fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
-                >
-                  <Send size={16} /> {sending ? 'Transmitindo...' : 'Transmitir à AUDESP'}
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={handleConsultarProtocolo}
-                  disabled={sending}
-                  className="btn btn-light text-primary fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
-                >
-                  <RefreshCw size={16} className={sending ? 'spin' : ''} /> Atualizar Status
-                </button>
-                {statusProtocolo?.toLowerCase().includes('rejeitado') && (
-                  <button
-                    onClick={handleRetornarRascunho}
-                    className="btn btn-warning text-dark fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
-                  >
-                    <RotateCcw size={16} /> Corrigir e Reenviar
-                  </button>
-                )}
-              </>
-            )}
-          </div>
+          <button
+            onClick={() => navigate('/editais')}
+            className="btn btn-outline-light btn-sm d-flex align-items-center gap-1"
+          >
+            <ArrowLeft size={16} /> Voltar à Lista
+          </button>
         }
       />
 
@@ -706,7 +667,7 @@ export const EditalForm: React.FC = () => {
             </div>
 
             <div className="input-group input-group-sm">
-              <Form.Control 
+              <Form.Control
                 type="text"
                 className="form-control font-monospace"
                 placeholder={semPncp ? 'Ex: PE-000001/2026' : '00.000.000/0000-00-1-000000/0000'}
@@ -733,8 +694,8 @@ export const EditalForm: React.FC = () => {
               )}
             </div>
             <span className="text-muted" style={{ fontSize: '0.75rem' }}>
-              {semPncp 
-                ? 'Código único gerado pela entidade (máximo 25 caracteres)' 
+              {semPncp
+                ? 'Código único gerado pela entidade (máximo 25 caracteres)'
                 : 'Formato PNCP: 14 dígitos CNPJ + "1" + 6 seq + 4 ano (total 25)'}
             </span>
           </div>
@@ -743,7 +704,7 @@ export const EditalForm: React.FC = () => {
             <Form.Label className="form-label fw-bold small text-secondary">
               Data do Edital *
             </Form.Label>
-            <Form.Control 
+            <Form.Control
               type="date"
               className="form-control form-control-sm"
               value={dataDocumento}
@@ -771,8 +732,8 @@ export const EditalForm: React.FC = () => {
       </Card>
 
       {/* Seção 2: Publicidade */}
-      <Card 
-        title="2. Publicidade do Instrumento Convocatório" 
+      <Card
+        title="2. Publicidade do Instrumento Convocatório"
         className="mb-4"
         actions={
           houvePublicacao && !isSent && (
@@ -920,7 +881,7 @@ export const EditalForm: React.FC = () => {
             <Form.Label className="form-label fw-bold small text-secondary">
               Número da Compra (no sistema de origem) *
             </Form.Label>
-            <Form.Control 
+            <Form.Control
               type="text"
               className="form-control form-control-sm"
               placeholder="Ex: Pregão 14 ou 0001"
@@ -935,7 +896,7 @@ export const EditalForm: React.FC = () => {
             <Form.Label className="form-label fw-bold small text-secondary">
               Ano da Compra *
             </Form.Label>
-            <Form.Control 
+            <Form.Control
               type="number"
               className="form-control form-control-sm"
               value={anoCompra}
@@ -950,7 +911,7 @@ export const EditalForm: React.FC = () => {
             <Form.Label className="form-label fw-bold small text-secondary">
               Número do Processo de Origem *
             </Form.Label>
-            <Form.Control 
+            <Form.Control
               type="text"
               className="form-control form-control-sm"
               placeholder="Ex: 1234/2026"
@@ -965,7 +926,7 @@ export const EditalForm: React.FC = () => {
             <Form.Label className="form-label fw-bold small text-secondary">
               Código Unidade Compradora
             </Form.Label>
-            <Form.Control 
+            <Form.Control
               type="text"
               className="form-control form-control-sm"
               placeholder="Facultativo (máx 20 caracteres)"
@@ -1025,9 +986,9 @@ export const EditalForm: React.FC = () => {
           {/* Datas de abertura e encerramento */}
           <div className="col-md-6">
             <Form.Label className="form-label fw-bold small text-secondary">
-              Data e Hora de Abertura de Propostas { (tipoInstrumentoId === 1 || tipoInstrumentoId === 2) && '*' }
+              Data e Hora de Abertura de Propostas {(tipoInstrumentoId === 1 || tipoInstrumentoId === 2) && '*'}
             </Form.Label>
-            <Form.Control 
+            <Form.Control
               type="datetime-local"
               className="form-control form-control-sm"
               value={dataAberturaProposta}
@@ -1041,9 +1002,9 @@ export const EditalForm: React.FC = () => {
 
           <div className="col-md-6">
             <Form.Label className="form-label fw-bold small text-secondary">
-              Data e Hora de Encerramento de Propostas { (tipoInstrumentoId === 1 || tipoInstrumentoId === 2) && '*' }
+              Data e Hora de Encerramento de Propostas {(tipoInstrumentoId === 1 || tipoInstrumentoId === 2) && '*'}
             </Form.Label>
-            <Form.Control 
+            <Form.Control
               type="datetime-local"
               className="form-control form-control-sm"
               value={dataEncerramentoProposta}
@@ -1054,28 +1015,69 @@ export const EditalForm: React.FC = () => {
 
           {/* Amparo Legal */}
           <div className="col-12">
-            <Form.Label className="form-label fw-bold small text-secondary">
-              Amparo Legal (Lei 14.133 / Legislação Específica) *
-            </Form.Label>
+            <div className="d-flex justify-content-between align-items-center mb-1">
+              <Form.Label className="form-label fw-bold small text-secondary mb-0">
+                Amparo Legal (Lei 14.133 / Legislação Específica) *
+              </Form.Label>
+              <div style={{ maxWidth: '300px', width: '100%' }}>
+                <Form.Control
+                  type="text"
+                  size="sm"
+                  placeholder="🔍 Filtrar amparo (ex: pregão, 28, dispensa)..."
+                  value={buscaAmparo}
+                  onChange={(e) => setBuscaAmparo(e.target.value)}
+                  disabled={isSent}
+                />
+              </div>
+            </div>
+
             <Form.Select
               className="form-select form-select-sm"
               value={amparoLegalId}
               onChange={(e) => setAmparoLegalId(Number(e.target.value))}
               disabled={isSent}
+              style={{ textOverflow: 'ellipsis', overflow: 'hidden' }}
             >
-              {dominios?.amparosLegais?.map((amp) => (
-                <option key={amp.id} value={amp.id}>
-                  {amp.label}
-                </option>
-              ))}
+              {dominios?.amparosLegais
+                ?.filter((amp) => {
+                  if (!buscaAmparo.trim()) return true;
+                  const termo = buscaAmparo.toLowerCase();
+                  return (
+                    amp.artigo?.toLowerCase().includes(termo) ||
+                    amp.detalhe?.toLowerCase().includes(termo) ||
+                    amp.label?.toLowerCase().includes(termo) ||
+                    amp.id === amparoLegalId
+                  );
+                })
+                .map((amp) => (
+                  <option key={amp.id} value={amp.id} title={amp.label}>
+                    {amp.artigo ? `${amp.artigo} — ${amp.detalhe ? (amp.detalhe.length > 120 ? amp.detalhe.slice(0, 120) + '...' : amp.detalhe) : amp.label}` : amp.label}
+                  </option>
+                ))}
             </Form.Select>
+
+            {/* Card com o texto completo do Amparo Legal selecionado */}
+            {(() => {
+              const selecionado = dominios?.amparosLegais?.find((a) => a.id === amparoLegalId);
+              if (!selecionado) return null;
+              return (
+                <div className="p-2 mt-2 bg-light border rounded small">
+                  <div className="fw-bold text-success mb-1">
+                    {selecionado.artigo || `Amparo Legal #${selecionado.id}`}
+                  </div>
+                  <div className="text-secondary" style={{ lineHeight: '1.4' }}>
+                    {selecionado.detalhe || selecionado.label}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           <div className="col-md-6">
             <Form.Label className="form-label fw-bold small text-secondary">
               Link do Sistema de Origem (Lances)
             </Form.Label>
-            <Form.Control 
+            <Form.Control
               type="url"
               className="form-control form-control-sm"
               placeholder="https://..."
@@ -1090,7 +1092,7 @@ export const EditalForm: React.FC = () => {
             <Form.Label className="form-label fw-bold small text-secondary">
               Justificativa Presencial (se aplicável)
             </Form.Label>
-            <Form.Control 
+            <Form.Control
               type="text"
               className="form-control form-control-sm"
               placeholder="Justificativa pela escolha da modalidade presencial"
@@ -1104,8 +1106,8 @@ export const EditalForm: React.FC = () => {
       </Card>
 
       {/* Seção 4: Itens de Compra */}
-      <Card 
-        title="4. Lista de Itens da Contratação" 
+      <Card
+        title="4. Lista de Itens da Contratação"
         className="mb-4"
         actions={
           !isSent && (
@@ -1210,9 +1212,9 @@ export const EditalForm: React.FC = () => {
                 {pdfNomeOriginal ? pdfNomeOriginal : 'Nenhum arquivo PDF anexado'}
               </h6>
               <p className="text-muted small mb-0">
-                Regra AUDESP: Arquivo PDF com até 30 MB. 
-                {modalidadeId === 9 
-                  ? ' Facultativo apenas para Inexigibilidade de Licitação.' 
+                Regra AUDESP: Arquivo PDF com até 30 MB.
+                {modalidadeId === 9
+                  ? ' Facultativo apenas para Inexigibilidade de Licitação.'
                   : ' Obrigatório para a modalidade selecionada.'}
               </p>
             </div>
@@ -1246,6 +1248,63 @@ export const EditalForm: React.FC = () => {
           </div>
         </div>
       </Card>
+
+      {/* Botões de Ação no Final do Formulário */}
+      <div className="card shadow-sm border-0 mt-4 p-3 bg-white">
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <button
+            type="button"
+            onClick={() => navigate('/editais')}
+            className="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1"
+          >
+            <ArrowLeft size={16} /> Voltar à Lista
+          </button>
+
+          <div className="d-flex align-items-center gap-2">
+            {!isSent ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleSalvarRascunho}
+                  disabled={saving || sending}
+                  className="btn btn-outline-success fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                >
+                  <Save size={16} /> {saving ? 'Salvando...' : 'Salvar Rascunho'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleEnviarAudesp}
+                  disabled={saving || sending}
+                  className="btn btn-warning text-dark fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                >
+                  <Send size={16} /> {sending ? 'Transmitindo...' : 'Transmitir à AUDESP'}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={handleConsultarProtocolo}
+                  disabled={sending}
+                  className="btn btn-outline-primary fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                >
+                  <RefreshCw size={16} className={sending ? 'spin' : ''} /> Atualizar Status
+                </button>
+                {statusProtocolo?.toLowerCase().includes('rejeitado') && (
+                  <button
+                    type="button"
+                    onClick={handleRetornarRascunho}
+                    className="btn btn-warning text-dark fw-bold btn-sm d-flex align-items-center gap-1 shadow-sm"
+                  >
+                    <RotateCcw size={16} /> Corrigir e Reenviar
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* Modal: Publicação */}
       {showPubModal && (
@@ -1300,21 +1359,33 @@ export const EditalForm: React.FC = () => {
                   </div>
                 )}
 
-                {pubForm.veiculoPublicacao === 10 && (
-                  <div className="mb-3">
-                    <Form.Label className="form-label small fw-bold text-secondary">
-                      Nome do Veículo de Publicação *
-                    </Form.Label>
-                    <Form.Control
-                      type="text"
-                      className="form-control form-control-sm"
-                      placeholder="Nome do jornal ou veículo"
-                      value={pubForm.veiculoPublicacaoNome || ''}
-                      onChange={(e) => setPubForm({ ...pubForm, veiculoPublicacaoNome: e.target.value })}
-                      maxLength={100}
-                    />
-                  </div>
-                )}
+                <div className="mb-3">
+                  <Form.Label className="form-label small fw-bold text-secondary">
+                    Nome / Identificação do Veículo de Publicação
+                    {pubForm.veiculoPublicacao === 10 && <span className="text-danger"> *</span>}
+                  </Form.Label>
+                  <Form.Control
+                    type="text"
+                    className="form-control form-control-sm"
+                    placeholder={
+                      pubForm.veiculoPublicacao === 9
+                        ? 'Ex: https://www.santos.sp.gov.br ou Portal da Transparência'
+                        : pubForm.veiculoPublicacao === 10
+                        ? 'Nome do jornal ou veículo (obrigatório para "Outros")'
+                        : 'Identificação complementar do veículo/edição (opcional)'
+                    }
+                    value={pubForm.veiculoPublicacaoNome || ''}
+                    onChange={(e) => setPubForm({ ...pubForm, veiculoPublicacaoNome: e.target.value })}
+                    maxLength={100}
+                  />
+                  <span className="text-muted" style={{ fontSize: '0.72rem' }}>
+                    {pubForm.veiculoPublicacao === 10
+                      ? 'Obrigatório para a opção "Outros".'
+                      : pubForm.veiculoPublicacao === 9
+                      ? 'Informe o link ou nome do portal/site.'
+                      : 'Opcional. Nome do diário, jornal ou veículo utilizado.'}
+                  </span>
+                </div>
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowPubModal(false)}>

@@ -1,6 +1,6 @@
 import json
 from typing import Optional, List, Dict, Any
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 
 from fastapi import HTTPException
 from sqlmodel import Session, select, or_
@@ -75,13 +75,13 @@ class AtaService:
         # Parse de datas
         def parse_date(val):
             if not val:
-                return datetime.utcnow().date()
+                return datetime.now(timezone.utc).date()
             if isinstance(val, (date, datetime)):
                 return val if isinstance(val, date) else val.date()
             try:
                 return datetime.strptime(str(val).split("T")[0], "%Y-%m-%d").date()
             except Exception:
-                return datetime.utcnow().date()
+                return datetime.now(timezone.utc).date()
 
         dt_assinatura = parse_date(documento.get("dataAssinatura"))
         dt_inicio = parse_date(documento.get("dataVigenciaInicio"))
@@ -128,7 +128,7 @@ class AtaService:
             ata.data_vigencia_inicio = dt_inicio
             ata.data_vigencia_fim = dt_fim
             ata.documento_json = json.dumps(documento, ensure_ascii=False)
-            ata.updated_at = datetime.utcnow()
+            ata.updated_at = datetime.now(timezone.utc)
 
         session.commit()
         session.refresh(ata)
@@ -153,6 +153,21 @@ class AtaService:
 
         # Valida regras de negócio do schema
         erros_validacao = validar_regras_negocio_ata(documento)
+
+        # Cross-validation com Licitacao vinculada (se houver)
+        if ata.licitacao_id:
+            licitacao = session.get(Licitacao, ata.licitacao_id)
+            if licitacao and licitacao.documento_json:
+                try:
+                    lic_doc = json.loads(licitacao.documento_json)
+                    lic_itens = {str(item.get("numeroItem")) for item in lic_doc.get("item", []) if item.get("numeroItem") is not None}
+                    ata_itens = [str(x) for x in documento.get("numeroItem", [])]
+                    for item_num in ata_itens:
+                        if item_num not in lic_itens:
+                            erros_validacao.append(f"O item '{item_num}' informado na ata não consta nos itens da licitação vinculada.")
+                except Exception:
+                    pass
+
         if erros_validacao and not forcar:
             raise HTTPException(
                 status_code=422,
@@ -170,7 +185,7 @@ class AtaService:
             ata.protocolo = resultado.get("protocolo")
             ata.status_protocolo = "Recebido"
             ata.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
-            ata.updated_at = datetime.utcnow()
+            ata.updated_at = datetime.now(timezone.utc)
             session.commit()
             session.refresh(ata)
             return {
@@ -182,7 +197,7 @@ class AtaService:
         else:
             ata.status = "error"
             ata.detalhes_protocolo = json.dumps(resultado, ensure_ascii=False)
-            ata.updated_at = datetime.utcnow()
+            ata.updated_at = datetime.now(timezone.utc)
             session.commit()
             return {
                 "sucesso": False,
@@ -207,7 +222,7 @@ class AtaService:
             novo_status = resultado.get("status")
             ata.status_protocolo = novo_status
             ata.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
-            ata.updated_at = datetime.utcnow()
+            ata.updated_at = datetime.now(timezone.utc)
             session.commit()
             session.refresh(ata)
             return {
@@ -229,7 +244,7 @@ class AtaService:
         if not ata:
             raise HTTPException(status_code=404, detail="Ata não encontrada.")
         ata.status = "draft"
-        ata.updated_at = datetime.utcnow()
+        ata.updated_at = datetime.now(timezone.utc)
         session.commit()
         session.refresh(ata)
         return ata

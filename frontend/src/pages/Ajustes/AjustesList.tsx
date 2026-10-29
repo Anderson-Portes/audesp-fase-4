@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Container, 
-  Row, 
-  Col, 
   ButtonGroup, 
   Button, 
   InputGroup, 
@@ -116,71 +114,80 @@ export const AjustesList: React.FC = () => {
   };
 
   return (
-    <Container fluid className="p-4">
+    <Container fluid className="p-0">
       <PageHeader
         title="Ajustes e Contratos (Fase IV)"
-        description="Gestão de instrumentos contratuais, termos aditivos e apostilamentos (TCESP)"
-        actions={
-          <Button
-            variant="primary"
-            onClick={() => navigate('/ajustes/novo')}
-            className="d-flex align-items-center gap-2"
-          >
-            <Plus size={18} />
-            <span>Novo Contrato / Ajuste</span>
-          </Button>
-        }
       />
 
-      {/* Tabs e Barra de Busca */}
-      <Row className="g-3 mb-4 align-items-center">
-        <Col xs="auto">
-          <ButtonGroup className="shadow-sm">
+      <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+        {/* Tabs com ButtonGroup e Botão Novo */}
+        <div className="d-flex align-items-center gap-3">
+          <ButtonGroup className="shadow-sm bg-white p-1 rounded">
             <Button
-              variant={tab === 'draft' ? 'primary' : 'outline-primary'}
+              size="sm"
+              variant={tab === 'draft' ? 'success' : 'light'}
+              className={`px-4 py-2 fw-medium ${tab === 'draft' ? 'text-white shadow-sm' : 'text-dark'}`}
               onClick={() => setTab('draft')}
             >
-              Rascunhos Locais
+              <Edit size={16} className="me-1 d-inline" /> Rascunhos Locais
             </Button>
             <Button
-              variant={tab === 'sent' ? 'primary' : 'outline-primary'}
+              size="sm"
+              variant={tab === 'sent' ? 'success' : 'light'}
+              className={`px-4 py-2 fw-medium ${tab === 'sent' ? 'text-white shadow-sm' : 'text-dark'}`}
               onClick={() => setTab('sent')}
             >
-              Transmitidos ao AUDESP
+              <CheckCircle2 size={16} className="me-1 d-inline" /> Enviados ao AUDESP
             </Button>
           </ButtonGroup>
-        </Col>
 
-        <Col>
-          <Form onSubmit={handleSearchSubmit} className="d-flex gap-2">
-            <InputGroup>
-              <InputGroup.Text className="bg-white">
-                <Search size={16} className="text-muted" />
-              </InputGroup.Text>
-              <Form.Control
-                type="text"
-                placeholder="Buscar por número do contrato, processo, fornecedor ou protocolo..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </InputGroup>
-            <Button type="submit" variant="outline-secondary">
-              Buscar
-            </Button>
-          </Form>
-        </Col>
-
-        <Col xs="auto">
           <Button
-            variant="outline-secondary"
+            variant="success"
+            size="sm"
+            onClick={() => navigate('/ajustes/novo')}
+            className="fw-bold d-flex align-items-center gap-2 shadow-sm py-2 px-3"
+          >
+            <Plus size={18} /> Novo Contrato / Ajuste
+          </Button>
+        </div>
+
+        {/* Busca com Form e InputGroup */}
+        <Form onSubmit={handleSearchSubmit} className="d-flex align-items-center gap-2">
+          <InputGroup size="sm" style={{ width: '340px' }}>
+            <InputGroup.Text className="bg-white border-end-0">
+              <Search size={16} className="text-muted" />
+            </InputGroup.Text>
+            <Form.Control
+              type="text"
+              className="border-start-0 ps-0"
+              placeholder="Buscar por contrato, processo, fornecedor..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <Button
+                variant="outline-secondary"
+                onClick={() => { setSearch(''); carregarAjustes(); }}
+              >
+                ×
+              </Button>
+            )}
+            <Button type="submit" variant="outline-success">
+              Filtrar
+            </Button>
+          </InputGroup>
+
+          <Button
+            variant="light"
+            size="sm"
             onClick={carregarAjustes}
-            className="d-flex align-items-center gap-1"
+            className="border shadow-sm text-secondary p-2"
             title="Atualizar lista"
           >
             <RefreshCw size={16} />
           </Button>
-        </Col>
-      </Row>
+        </Form>
+      </div>
 
       {/* Tabela com React-Bootstrap */}
       <CardBox>
@@ -191,8 +198,25 @@ export const AjustesList: React.FC = () => {
           </div>
         ) : ajustes.length === 0 ? (
           <div className="text-center py-5 text-muted">
-            <FileCheck size={40} className="mb-2 opacity-25" />
-            <p className="mb-0">Nenhum contrato ou ajuste encontrado nesta aba.</p>
+            <FileCheck size={48} className="mb-3 opacity-25" />
+            <h5 className="text-secondary fw-semibold">
+              {search ? 'Nenhum contrato encontrado para o filtro' : tab === 'draft' ? 'Nenhum rascunho de contrato ou ajuste' : 'Nenhum contrato enviado ao AUDESP'}
+            </h5>
+            <p className="text-muted small mb-3">
+              {tab === 'draft'
+                ? 'Clique no botão "+ Novo Contrato / Ajuste" acima para cadastrar instrumentos contratuais ou termos.'
+                : 'Os contratos transmitidos com sucesso para a API do AUDESP aparecerão nesta aba.'}
+            </p>
+            {tab === 'draft' && (
+              <Button
+                variant="success"
+                size="sm"
+                onClick={() => navigate('/ajustes/novo')}
+                className="mt-1"
+              >
+                Cadastrar Primeiro Contrato
+              </Button>
+            )}
           </div>
         ) : (
           <Table responsive hover className="align-middle mb-0">
@@ -226,7 +250,9 @@ export const AjustesList: React.FC = () => {
                     <span className="badge bg-light text-dark border">
                       {ajuste.processo}
                     </span>
-                    <small className="d-block text-muted">Edital: {ajuste.codigo_edital}</small>
+                    <small className="d-block text-muted">
+                      {ajuste.edital_id ? `Edital: ${ajuste.codigo_edital}` : `Adesão (PNCP): ${ajuste.codigo_edital}`}
+                    </small>
                   </td>
                   <td>
                     <strong className="text-success">{formatBRL(ajuste.valor_inicial)}</strong>
@@ -268,17 +294,18 @@ export const AjustesList: React.FC = () => {
                           <Button
                             variant="outline-primary"
                             onClick={() => navigate(`/ajustes/${ajuste.id}`)}
+                            disabled={actionLoadingId === ajuste.id}
                             title="Editar rascunho"
                           >
-                            <Edit size={14} />
+                            <Edit size={14} className="me-1" /> Editar
                           </Button>
                           <Button
-                            variant="outline-success"
+                            variant="success"
                             onClick={() => handleEnviar(ajuste.id, ajuste.numero_contrato_empenho)}
                             disabled={actionLoadingId === ajuste.id}
                             title="Transmitir para o AUDESP"
                           >
-                            <Send size={14} />
+                            <Send size={14} className="me-1" /> Transmitir
                           </Button>
                         </>
                       ) : (
@@ -290,7 +317,7 @@ export const AjustesList: React.FC = () => {
                               disabled={actionLoadingId === ajuste.id}
                               title="Consultar status no TCESP"
                             >
-                              <RefreshCw size={14} className={actionLoadingId === ajuste.id ? 'spin' : ''} />
+                              <RefreshCw size={14} className={`me-1 ${actionLoadingId === ajuste.id ? 'spin' : ''}`} /> Consultar Protocolo
                             </Button>
                           )}
                           <Button
@@ -299,7 +326,7 @@ export const AjustesList: React.FC = () => {
                             disabled={actionLoadingId === ajuste.id}
                             title="Reabrir para rascunho"
                           >
-                            <RotateCcw size={14} />
+                            <RotateCcw size={14} className="me-1" /> Destravar
                           </Button>
                         </>
                       )}
