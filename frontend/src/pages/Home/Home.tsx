@@ -143,8 +143,21 @@ export const Home: React.FC = () => {
         </div>
 
         <div className="col-md-4">
-          <CardBox className="h-100 shadow-sm border-0">
-            <div className="d-flex align-items-center gap-3">
+          <CardBox 
+            className="h-100 shadow-sm border-0 cursor-pointer"
+            actions={
+              <button 
+                onClick={() => navigate('/protocolos')}
+                className="btn btn-outline-info btn-sm"
+              >
+                Consultar Protocolos &rarr;
+              </button>
+            }
+          >
+            <div 
+              className="d-flex align-items-center gap-3"
+              onClick={() => navigate('/protocolos')}
+            >
               <div className="p-3 bg-info bg-opacity-10 text-info rounded-3">
                 <Search size={28} />
               </div>
@@ -154,8 +167,8 @@ export const Home: React.FC = () => {
                 <span className="badge bg-info mt-1">Tempo Real</span>
               </div>
             </div>
-            <p className="text-muted small mt-3 mb-0">
-              Acompanhamento de status de validação no TCESP (Recebido, Armazenado ou Rejeitado).
+            <p className="text-muted small mt-3 mb-0" onClick={() => navigate('/protocolos')}>
+              Acompanhamento de status de validação no TCESP (Recebido, Armazenado ou Rejeitado) de todos os módulos.
             </p>
           </CardBox>
         </div>

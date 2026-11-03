@@ -20,14 +20,23 @@ import {
   RotateCcw,
   CheckCircle2,
   Calendar,
-  AlertTriangle
+  AlertTriangle,
+  History
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import { PageHeader } from '../../components/PageHeader/PageHeader';
 import { CardBox } from '../../components/CardBox/CardBox';
+import {
+  ProtocoloErrosAlert,
+  HistoricoProtocoloModal,
+  notificarResultadoProtocolo,
+} from '../../components/ProtocoloInfo/ProtocoloComponents';
+import { ImportacaoExportacaoToolbar } from '../../components/ImportacaoExportacao/ImportacaoExportacaoModal';
 import { ajusteService } from '../../services/ajusteService';
 import type { AjusteContrato } from '../../types/ajuste';
+import type { HistoricoProtocoloItem } from '../../utils/protocoloFormatter';
+import { extrairErrosDetalhadosProtocolo } from '../../utils/protocoloFormatter';
 import { formatDateBR, formatBRL } from '../../utils/formatters';
 
 export const AjustesList: React.FC = () => {
@@ -37,6 +46,13 @@ export const AjustesList: React.FC = () => {
   const [ajustes, setAjustes] = useState<AjusteContrato[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+  const [showHistoricoModal, setShowHistoricoModal] = useState(false);
+  const [historicoLoading, setHistoricoLoading] = useState(false);
+  const [historicoItems, setHistoricoItems] = useState<HistoricoProtocoloItem[]>([]);
+  const [historicoDocInfo, setHistoricoDocInfo] = useState<{ codigo: string; protocolo?: string | null }>({
+    codigo: '',
+    protocolo: null,
+  });
 
   const carregarAjustes = async () => {
     try {
@@ -67,14 +83,32 @@ export const AjustesList: React.FC = () => {
       setActionLoadingId(id);
       const res = await ajusteService.enviarAjuste(id);
       if (res.sucesso) {
-        toast.success(`Ajuste transmitido com sucesso! Protocolo: ${res.protocolo}`);
+        notificarResultadoProtocolo(res, {
+          prefixoSucesso: 'Ajuste transmitido com sucesso!',
+          isTransmissao: true,
+        });
         carregarAjustes();
       } else {
         toast.error(res.mensagem || 'Erro na transmissão');
       }
     } catch (err: any) {
-      const msg = err.response?.data?.detail?.mensagem || err.response?.data?.detail || 'Erro ao enviar ajuste';
-      toast.error(msg);
+      const detail = err.response?.data?.detail;
+      if (detail && detail.erros && detail.erros.length > 0) {
+        toast.error(
+          <div>
+            <strong>Erros de Validação do Ajuste:</strong>
+            <ul className="mb-0 ps-3 mt-1 small">
+              {detail.erros.map((e: string, i: number) => (
+                <li key={i}>{e}</li>
+              ))}
+            </ul>
+          </div>,
+          { duration: 7000 }
+        );
+      } else {
+        const msg = detail?.mensagem || detail || 'Erro ao enviar ajuste';
+        toast.error(msg);
+      }
     } finally {
       setActionLoadingId(null);
     }
@@ -85,7 +119,7 @@ export const AjustesList: React.FC = () => {
       setActionLoadingId(id);
       const res = await ajusteService.consultarProtocolo(id);
       if (res.sucesso) {
-        toast.success(`Status atualizado: ${res.status}`);
+        notificarResultadoProtocolo(res, { isTransmissao: false });
         carregarAjustes();
       } else {
         toast.error(res.mensagem || 'Erro ao consultar protocolo');
@@ -94,6 +128,23 @@ export const AjustesList: React.FC = () => {
       toast.error(err.response?.data?.detail || 'Falha na consulta');
     } finally {
       setActionLoadingId(null);
+    }
+  };
+
+  const handleVerHistoricoProtocolo = async (ajuste: AjusteContrato) => {
+    setHistoricoDocInfo({
+      codigo: ajuste.codigo_contrato || `${ajuste.numero_contrato_empenho}/${ajuste.ano_contrato}`,
+      protocolo: ajuste.protocolo,
+    });
+    setShowHistoricoModal(true);
+    try {
+      setHistoricoLoading(true);
+      const data = await ajusteService.getHistoricoProtocolo(ajuste.id);
+      setHistoricoItems(data);
+    } catch {
+      toast.error('Erro ao carregar histórico de consultas do protocolo');
+    } finally {
+      setHistoricoLoading(false);
     }
   };
 
@@ -149,6 +200,12 @@ export const AjustesList: React.FC = () => {
           >
             <Plus size={18} /> Novo Contrato / Ajuste
           </Button>
+
+          <ImportacaoExportacaoToolbar
+            modulo="ajustes"
+            tituloModulo="Ajustes e Contratos"
+            onImportSuccess={carregarAjustes}
+          />
         </div>
 
         {/* Busca com Form e InputGroup */}
@@ -232,112 +289,159 @@ export const AjustesList: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {ajustes.map((ajuste) => (
-                <tr key={ajuste.id}>
-                  <td>
-                    <span className="fw-bold text-dark d-block">
-                      {ajuste.numero_contrato_empenho}/{ajuste.ano_contrato}
-                    </span>
-                    <small className="text-muted font-monospace">{ajuste.codigo_contrato}</small>
-                  </td>
-                  <td>
-                    <span className="fw-semibold text-dark d-block">
-                      {ajuste.nome_razao_social_fornecedor}
-                    </span>
-                    <small className="text-muted font-monospace">{ajuste.ni_fornecedor} ({ajuste.tipo_pessoa_fornecedor})</small>
-                  </td>
-                  <td>
-                    <span className="badge bg-light text-dark border">
-                      {ajuste.processo}
-                    </span>
-                    <small className="d-block text-muted">
-                      {ajuste.edital_id ? `Edital: ${ajuste.codigo_edital}` : `Adesão (PNCP): ${ajuste.codigo_edital}`}
-                    </small>
-                  </td>
-                  <td>
-                    <strong className="text-success">{formatBRL(ajuste.valor_inicial)}</strong>
-                  </td>
-                  <td>
-                    <span className="small text-muted d-block">
-                      <Calendar size={13} className="me-1 inline" />
-                      {ajuste.data_vigencia_inicio ? formatDateBR(ajuste.data_vigencia_inicio) : '-'} até {ajuste.data_vigencia_fim ? formatDateBR(ajuste.data_vigencia_fim) : '-'}
-                    </span>
-                  </td>
-                  <td>
-                    {ajuste.status === 'draft' && (
-                      <Badge bg="secondary">Rascunho</Badge>
-                    )}
-                    {ajuste.status === 'sent' && (
-                      <div>
-                        <Badge bg="success" className="d-inline-flex align-items-center gap-1">
-                          <CheckCircle2 size={12} />
-                          {ajuste.status_protocolo || 'Transmitido'}
-                        </Badge>
-                        {ajuste.protocolo && (
-                          <span className="d-block small font-monospace text-muted mt-1">
-                            Prot: {ajuste.protocolo}
-                          </span>
+              {ajustes.map((ajuste) => {
+                const isRejected = (ajuste.status_protocolo || '').toLowerCase().includes('rejeitado');
+                const errosAjuste = extrairErrosDetalhadosProtocolo(ajuste.detalhes_protocolo);
+                const mostrarLinhaErros = isRejected || errosAjuste.length > 0;
+
+                return (
+                  <React.Fragment key={ajuste.id}>
+                    <tr>
+                      <td>
+                        <span className="fw-bold text-dark d-block">
+                          {ajuste.numero_contrato_empenho}/{ajuste.ano_contrato}
+                        </span>
+                        <small className="text-muted font-monospace">{ajuste.codigo_contrato}</small>
+                      </td>
+                      <td>
+                        <span className="fw-semibold text-dark d-block">
+                          {ajuste.nome_razao_social_fornecedor}
+                        </span>
+                        <small className="text-muted font-monospace">{ajuste.ni_fornecedor} ({ajuste.tipo_pessoa_fornecedor})</small>
+                      </td>
+                      <td>
+                        <span className="badge bg-light text-dark border">
+                          {ajuste.processo}
+                        </span>
+                        <small className="d-block text-muted">
+                          {ajuste.edital_id ? `Edital: ${ajuste.codigo_edital}` : `Adesão (PNCP): ${ajuste.codigo_edital}`}
+                        </small>
+                      </td>
+                      <td>
+                        <strong className="text-success">{formatBRL(ajuste.valor_inicial)}</strong>
+                      </td>
+                      <td>
+                        <span className="small text-muted d-block">
+                          <Calendar size={13} className="me-1 inline" />
+                          {ajuste.data_vigencia_inicio ? formatDateBR(ajuste.data_vigencia_inicio) : '-'} até {ajuste.data_vigencia_fim ? formatDateBR(ajuste.data_vigencia_fim) : '-'}
+                        </span>
+                      </td>
+                      <td>
+                        {ajuste.status === 'draft' && (
+                          <Badge bg="secondary">Rascunho</Badge>
                         )}
-                      </div>
-                    )}
-                    {ajuste.status === 'error' && (
-                      <Badge bg="danger" className="d-inline-flex align-items-center gap-1">
-                        <AlertTriangle size={12} />
-                        Falha no Envio
-                      </Badge>
-                    )}
-                  </td>
-                  <td className="text-end">
-                    <ButtonGroup size="sm">
-                      {ajuste.status === 'draft' ? (
-                        <>
-                          <Button
-                            variant="outline-primary"
-                            onClick={() => navigate(`/ajustes/${ajuste.id}`)}
-                            disabled={actionLoadingId === ajuste.id}
-                            title="Editar rascunho"
-                          >
-                            <Edit size={14} className="me-1" /> Editar
-                          </Button>
-                          <Button
-                            variant="success"
-                            onClick={() => handleEnviar(ajuste.id, ajuste.numero_contrato_empenho)}
-                            disabled={actionLoadingId === ajuste.id}
-                            title="Transmitir para o AUDESP"
-                          >
-                            <Send size={14} className="me-1" /> Transmitir
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          {ajuste.protocolo && (
-                            <Button
-                              variant="outline-info"
-                              onClick={() => handleConsultarProtocolo(ajuste.id)}
-                              disabled={actionLoadingId === ajuste.id}
-                              title="Consultar status no TCESP"
+                        {ajuste.status === 'sent' && (
+                          <div>
+                            <Badge
+                              bg={
+                                isRejected
+                                  ? 'danger'
+                                  : (ajuste.status_protocolo || '').toLowerCase().includes('armazenado')
+                                  ? 'success'
+                                  : 'primary'
+                              }
+                              className="d-inline-flex align-items-center gap-1"
                             >
-                              <RefreshCw size={14} className={`me-1 ${actionLoadingId === ajuste.id ? 'spin' : ''}`} /> Consultar Protocolo
-                            </Button>
+                              {isRejected ? <AlertTriangle size={12} /> : <CheckCircle2 size={12} />}
+                              {ajuste.status_protocolo || 'Transmitido'}
+                            </Badge>
+                            {ajuste.protocolo && (
+                              <span className="d-block small font-monospace text-muted mt-1">
+                                Prot: {ajuste.protocolo}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {ajuste.status === 'error' && (
+                          <Badge bg="danger" className="d-inline-flex align-items-center gap-1">
+                            <AlertTriangle size={12} />
+                            Falha no Envio
+                          </Badge>
+                        )}
+                      </td>
+                      <td className="text-end">
+                        <ButtonGroup size="sm">
+                          {ajuste.status === 'draft' ? (
+                            <>
+                              <Button
+                                variant="outline-primary"
+                                onClick={() => navigate(`/ajustes/${ajuste.id}`)}
+                                disabled={actionLoadingId === ajuste.id}
+                                title="Editar rascunho"
+                              >
+                                <Edit size={14} className="me-1" /> Editar
+                              </Button>
+                              <Button
+                                variant="success"
+                                onClick={() => handleEnviar(ajuste.id, ajuste.numero_contrato_empenho)}
+                                disabled={actionLoadingId === ajuste.id}
+                                title="Transmitir para o AUDESP"
+                              >
+                                <Send size={14} className="me-1" /> Transmitir
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              {ajuste.protocolo && (
+                                <>
+                                  <Button
+                                    variant="outline-info"
+                                    onClick={() => handleConsultarProtocolo(ajuste.id)}
+                                    disabled={actionLoadingId === ajuste.id}
+                                    title="Consultar status no TCESP"
+                                  >
+                                    <RefreshCw size={14} className={`me-1 ${actionLoadingId === ajuste.id ? 'spin' : ''}`} /> Consultar Protocolo
+                                  </Button>
+                                  <Button
+                                    variant="outline-secondary"
+                                    onClick={() => handleVerHistoricoProtocolo(ajuste)}
+                                    disabled={actionLoadingId === ajuste.id}
+                                    title="Ver histórico de consultas de protocolo"
+                                  >
+                                    <History size={14} className="me-1" /> Histórico
+                                  </Button>
+                                </>
+                              )}
+                              <Button
+                                variant="outline-warning"
+                                onClick={() => handleRetornarRascunho(ajuste.id)}
+                                disabled={actionLoadingId === ajuste.id}
+                                title="Reabrir para rascunho"
+                              >
+                                <RotateCcw size={14} className="me-1" /> Destravar
+                              </Button>
+                            </>
                           )}
-                          <Button
-                            variant="outline-warning"
-                            onClick={() => handleRetornarRascunho(ajuste.id)}
-                            disabled={actionLoadingId === ajuste.id}
-                            title="Reabrir para rascunho"
-                          >
-                            <RotateCcw size={14} className="me-1" /> Destravar
-                          </Button>
-                        </>
-                      )}
-                    </ButtonGroup>
-                  </td>
-                </tr>
-              ))}
+                        </ButtonGroup>
+                      </td>
+                    </tr>
+                    {mostrarLinhaErros && (
+                      <tr>
+                        <td colSpan={7} className="border-top-0 pt-0">
+                          <ProtocoloErrosAlert
+                            errosDetalhados={errosAjuste}
+                            statusProtocolo={ajuste.status_protocolo}
+                            className="mt-1"
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </Table>
         )}
       </CardBox>
+
+      <HistoricoProtocoloModal
+        show={showHistoricoModal}
+        onHide={() => setShowHistoricoModal(false)}
+        protocolo={historicoDocInfo.protocolo}
+        codigoDocumento={historicoDocInfo.codigo}
+        historico={historicoItems}
+        loading={historicoLoading}
+      />
     </Container>
   );
 };

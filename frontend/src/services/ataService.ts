@@ -35,6 +35,11 @@ export const ataService = {
     return response.data;
   },
 
+  async getHistoricoProtocolo(id: number): Promise<any[]> {
+    const response = await api.get(`/api/atas/${id}/historico-protocolo`);
+    return response.data;
+  },
+
   async retornarRascunho(id: number): Promise<AtaRegistroPreco> {
     const response = await api.post(`/api/atas/${id}/retornar-rascunho`);
     return response.data;

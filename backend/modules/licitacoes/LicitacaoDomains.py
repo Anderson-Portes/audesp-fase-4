@@ -116,6 +116,200 @@ DOMINIO_RESULTADO_HABILITACAO = {
     7: "7 – Inabilitado"
 }
 
+def normalizar_ni_pessoa(tipo_pessoa_id: Any, ni: Any) -> str:
+    """Normaliza CPF/CNPJ e preserva a identificação de pessoa estrangeira."""
+    raw = str(ni or "").strip()
+    if str(tipo_pessoa_id or "") in ("PJ", "PF"):
+        return re.sub(r"\D", "", raw)
+    return raw
+
+
+def selecionar_licitacao_enviada(licitacoes: List[Any]) -> Any:
+    """
+    Seleciona a licitação enviada ('sent') mais recente de uma lista de licitações.
+    """
+    enviadas = [lic for lic in licitacoes if getattr(lic, "status", None) == "sent"]
+    if not enviadas:
+        return None
+    enviadas.sort(
+        key=lambda lic: (
+            getattr(lic, "updated_at", None) or datetime.min,
+            getattr(lic, "id", 0) or 0
+        ),
+        reverse=True
+    )
+    return enviadas[0]
+
+
+def extrair_numeros_itens_licitacao(lic_doc: Dict[str, Any]) -> Any:
+    """
+    Retorna um conjunto (set[int]) com os números dos itens da licitação enviada,
+    ou None caso o documento não possua a lista 'itens' legível.
+    """
+    if not isinstance(lic_doc, dict):
+        return None
+    itens = lic_doc.get("itens")
+    if not isinstance(itens, list):
+        return None
+    numeros = set()
+    for item in itens:
+        if not isinstance(item, dict):
+            return None
+        num = item.get("numeroItem")
+        if not isinstance(num, int) or isinstance(num, bool):
+            try:
+                num = int(num)
+            except Exception:
+                return None
+        numeros.add(num)
+    return numeros
+
+
+def validar_itens_contra_licitacao(
+    numeros: List[Any],
+    numeros_licitacao: Any = None
+) -> List[str]:
+    """
+    Valida duplicidade de itens e conferência contra os itens da licitação enviada.
+    """
+    erros: List[str] = []
+    encontrados = set()
+    for raw_num in numeros:
+        try:
+            numero = int(raw_num)
+        except Exception:
+            erros.append(f"Número de item inválido: {raw_num}.")
+            continue
+        if numero in encontrados:
+            erros.append(f"Item {numero} repetido. Não é permitido enviar itens duplicados.")
+        else:
+            encontrados.add(numero)
+        if numeros_licitacao is not None and numero not in numeros_licitacao:
+            erros.append(f"Item {numero} não consta na licitação vinculada ao edital.")
+    return erros
+
+
+def extrair_resultado_licitacao(
+    lic_doc: Dict[str, Any],
+    edital_doc: Dict[str, Any] = None
+) -> Dict[str, Any]:
+    """
+    Extrai itens homologados (situacaoCompraItemId == 2) e fornecedores vencedores
+    (resultadoHabilitacao == 1) com sugestão de valor inicial para Ata e Ajuste.
+    """
+    edital_doc = edital_doc or {}
+    itens_lic = [
+        it for it in (lic_doc.get("itens") or [])
+        if isinstance(it, dict)
+    ]
+    itens_compra = [
+        it for it in (edital_doc.get("itensCompra") or [])
+        if isinstance(it, dict)
+    ]
+
+    quantidades: Dict[int, float] = {}
+    for item in itens_compra:
+        try:
+            num_item = int(item.get("numeroItem"))
+            qtd = float(item.get("quantidade"))
+            quantidades[num_item] = qtd
+        except Exception:
+            pass
+
+    itens_homologados = sorted({
+        int(item["numeroItem"])
+        for item in itens_lic
+        if item.get("situacaoCompraItemId") == 2 and item.get("numeroItem") is not None
+    })
+
+    fornecedores_map: Dict[tuple, Dict[str, Any]] = {}
+    for item in itens_lic:
+        if item.get("situacaoCompraItemId") != 2:
+            continue
+        try:
+            numero_item = int(item.get("numeroItem"))
+        except Exception:
+            continue
+
+        tipo_orcamento = item.get("tipoOrcamento")
+        tipo_proposta = item.get("tipoProposta")
+        is_lote = (
+            tipo_orcamento == 1
+            or tipo_proposta == 1
+            or item.get("tipoEstimativa") == "lote"
+        )
+        quantidade = quantidades.get(numero_item)
+
+        for licitante in (item.get("licitantes") or []):
+            if not isinstance(licitante, dict):
+                continue
+            if licitante.get("resultadoHabilitacao") != 1:
+                continue
+
+            tipo_pessoa = str(licitante.get("tipoPessoaId") or "").strip()
+            ni = normalizar_ni_pessoa(tipo_pessoa, licitante.get("niPessoa"))
+            chave = (tipo_pessoa, ni)
+
+            if chave not in fornecedores_map:
+                fornecedores_map[chave] = {
+                    "niPessoa": ni,
+                    "tipoPessoaId": tipo_pessoa,
+                    "nomeRazaoSocial": "",
+                    "itens": set(),
+                    "valorSugerido": 0.0,
+                    "valorInvalido": False
+                }
+
+            forn = fornecedores_map[chave]
+            nome = str(licitante.get("nomeRazaoSocial") or "").strip()
+            if not forn["nomeRazaoSocial"] and nome:
+                forn["nomeRazaoSocial"] = nome
+            forn["itens"].add(numero_item)
+
+            raw_val = licitante.get("valor")
+            try:
+                valor = float(raw_val) if raw_val is not None else None
+            except Exception:
+                valor = None
+
+            if (
+                item.get("tipoValor") == "P"
+                or tipo_proposta == 3
+                or valor is None
+                or (not is_lote and quantidade is None)
+            ):
+                forn["valorInvalido"] = True
+                forn["valorSugerido"] = None
+            elif not forn["valorInvalido"] and forn["valorSugerido"] is not None:
+                forn["valorSugerido"] += valor if is_lote else (valor * quantidade)
+
+    fornecedores_lista = []
+    for forn in fornecedores_map.values():
+        itens_ordenados = sorted(forn["itens"])
+        val_sug = (
+            round(forn["valorSugerido"], 4)
+            if forn["valorSugerido"] is not None and not forn["valorInvalido"]
+            else None
+        )
+        fornecedores_lista.append({
+            "niPessoa": forn["niPessoa"],
+            "niFornecedor": forn["niPessoa"],
+            "tipoPessoaId": forn["tipoPessoaId"],
+            "tipoPessoaFornecedor": forn["tipoPessoaId"],
+            "nomeRazaoSocial": forn["nomeRazaoSocial"],
+            "itens": itens_ordenados,
+            "itensVencidos": itens_ordenados,
+            "valorSugerido": val_sug
+        })
+
+    fornecedores_lista.sort(key=lambda f: f["itens"][0] if f["itens"] else 0)
+
+    return {
+        "itensHomologados": itens_homologados,
+        "fornecedoresVencedores": fornecedores_lista
+    }
+
+
 def validar_regras_negocio_licitacao(doc: Dict[str, Any]) -> List[str]:
     """
     Executa a validação de negócio da Licitação (Fase IV) conforme a coluna

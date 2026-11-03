@@ -81,6 +81,11 @@ async def consultar_protocolo(
     token = authorization.replace("Bearer ", "").strip()
     return await EditalService.consultar_protocolo(session=session, id=id, token=token)
 
+@router.get("/{id}/historico-protocolo")
+def obter_historico_protocolo(id: int, session: Session = Depends(get_session)):
+    """Retorna o histórico de consultas de protocolo do edital."""
+    return EditalService.obter_historico_protocolo(session=session, id=id)
+
 @router.post("/{id}/retornar-rascunho")
 def retornar_rascunho(id: int, session: Session = Depends(get_session)):
     """Retorna um edital enviado/rejeitado para o estado de rascunho para reedição."""

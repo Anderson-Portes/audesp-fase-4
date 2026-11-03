@@ -12,14 +12,24 @@ import {
   AlertTriangle,
   CheckCircle2,
   RefreshCw,
-  RotateCcw
+  RotateCcw,
+  History
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Container, Form } from 'react-bootstrap';
 
 import { PageHeader } from '../../components/PageHeader/PageHeader';
 import { CardBox as Card } from '../../components/CardBox/CardBox';
-import { MunicipioEntidadeSelect } from '../../components/MunicipioEntidadeSelect/MunicipioEntidadeSelect';
+import {
+  ProtocoloErrosAlert,
+  HistoricoProtocoloModal,
+  notificarResultadoProtocolo,
+} from '../../components/ProtocoloInfo/ProtocoloComponents';
+import {
+  MunicipioEntidadeSelect,
+  getSavedMunicipio,
+  getSavedEntidade
+} from '../../components/MunicipioEntidadeSelect/MunicipioEntidadeSelect';
 import { editalService } from '../../services/editalService';
 import type {
   Edital,
@@ -27,6 +37,7 @@ import type {
   ItemCompra,
   DominiosResponse
 } from '../../types/edital';
+import type { HistoricoProtocoloItem } from '../../utils/protocoloFormatter';
 import {
   formatBRL,
   formatDecimal4,
@@ -50,10 +61,17 @@ export const EditalForm: React.FC = () => {
   const [protocolo, setProtocolo] = useState<string | null>(null);
   const [statusProtocolo, setStatusProtocolo] = useState<string | null>(null);
   const [detalhesProtocolo, setDetalhesProtocolo] = useState<any>(null);
+  const [historicoProtocolo, setHistoricoProtocolo] = useState<HistoricoProtocoloItem[]>([]);
+  const [showHistoricoModal, setShowHistoricoModal] = useState<boolean>(false);
+  const [dependentes, setDependentes] = useState<{ licitacoes: number; atas: number; ajustes: number }>({
+    licitacoes: 0,
+    atas: 0,
+    ajustes: 0
+  });
 
   // 1. Descritor
-  const [municipio, setMunicipio] = useState<number>(7071);
-  const [entidade, setEntidade] = useState<number>(11310);
+  const [municipio, setMunicipio] = useState<number>(() => getSavedMunicipio(7071));
+  const [entidade, setEntidade] = useState<number>(() => getSavedEntidade(11310));
   const [semPncp, setSemPncp] = useState<boolean>(false);
   const [codigoEdital, setCodigoEdital] = useState<string>('');
   const [dataDocumento, setDataDocumento] = useState<string>(
@@ -131,9 +149,13 @@ export const EditalForm: React.FC = () => {
           setProtocolo(edital.protocolo || null);
           setStatusProtocolo(edital.status_protocolo || null);
           setDetalhesProtocolo(edital.parsed_detalhes_protocolo || null);
+          setHistoricoProtocolo((edital as any).historico_protocolo || []);
           setPdfPath(edital.pdf_path || null);
           setPdfNomeOriginal(edital.pdf_nome_original || null);
           setSemPncp(edital.sem_pncp);
+          if (edital.dependentes) {
+            setDependentes(edital.dependentes);
+          }
 
           const doc = edital.parsed_documento;
           if (doc) {
@@ -188,6 +210,22 @@ export const EditalForm: React.FC = () => {
   // Se a modalidade for leilão (1 ou 13), ajusta categoria dos itens
   const isLeilao = modalidadeId === 1 || modalidadeId === 13;
   const isSent = editalStatus === 'sent';
+  const itensComCategoriaInvalidaLeilao = isLeilao
+    ? itens.filter((it) => it.itemCategoriaId !== 1 && it.itemCategoriaId !== 2).length
+    : 0;
+
+  const handleDefinirCategoriaLeilaoEmLote = (categoriaId: 1 | 2) => {
+    setItens((prev) =>
+      prev.map((it) => ({
+        ...it,
+        materialOuServico: 'M',
+        itemCategoriaId: categoriaId,
+      }))
+    );
+    toast.success(
+      `Categoria "${categoriaId === 1 ? '1 – Bens Imóveis' : '2 – Bens Móveis'}" aplicada a todos os itens.`
+    );
+  };
 
   // Montar payload JSON limpo conforme o Schema oficial
   const buildJsonDoc = () => {
@@ -225,7 +263,9 @@ export const EditalForm: React.FC = () => {
         valorUnitarioEstimado: Number(Number(it.valorUnitarioEstimado).toFixed(4)),
         valorTotal: Number(Number(it.valorTotal).toFixed(4)),
         criterioJulgamentoId: Number(it.criterioJulgamentoId),
-        itemCategoriaId: isLeilao ? Number(it.itemCategoriaId) : 3,
+        itemCategoriaId: isLeilao
+          ? ([1, 2].includes(Number(it.itemCategoriaId)) ? Number(it.itemCategoriaId) : 2)
+          : 3,
         ...(it.patrimonio?.trim() ? { patrimonio: it.patrimonio.trim() } : {}),
         ...(it.codigoRegistroImobiliario?.trim() ? { codigoRegistroImobiliario: it.codigoRegistroImobiliario.trim() } : {}),
       })),
@@ -233,14 +273,15 @@ export const EditalForm: React.FC = () => {
 
     if (houvePublicacao && publicacoes.length > 0) {
       doc.publicidade.publicacoes = publicacoes.map((p) => {
+        const veiculo = Number(p.veiculoPublicacao);
         const pubObj: any = {
           dataPublicacao: p.dataPublicacao,
-          veiculoPublicacao: Number(p.veiculoPublicacao),
+          veiculoPublicacao: veiculo,
         };
-        if (p.veiculoPublicacao === 5 && p.idContratacaoPNCP) {
+        if (veiculo === 5 && p.idContratacaoPNCP) {
           pubObj.idContratacaoPNCP = stripMask(p.idContratacaoPNCP);
         }
-        if (p.veiculoPublicacaoNome?.trim()) {
+        if (veiculo === 10 && p.veiculoPublicacaoNome?.trim()) {
           pubObj.veiculoPublicacaoNome = p.veiculoPublicacaoNome.trim();
         }
         return pubObj;
@@ -332,9 +373,26 @@ export const EditalForm: React.FC = () => {
       toast.error('Adicione ao menos um item de compra.');
       return;
     }
+    if (isLeilao && itensComCategoriaInvalidaLeilao > 0) {
+      toast.error(
+        'Para Leilão (modalidade 1 ou 13), defina a Categoria do Item como Bens Imóveis (1) ou Bens Móveis (2).'
+      );
+      return;
+    }
+    if (semPncp && houvePublicacao && publicacoes.some((p) => Number(p.veiculoPublicacao) === 5)) {
+      toast.error(
+        'Há publicação no PNCP (veículo 5). Desmarque "Sem PNCP" e informe o ID de Contratação PNCP.'
+      );
+      return;
+    }
     if (modalidadeId !== 9 && !pdfPath) {
       toast.error('O arquivo PDF do edital é obrigatório (exceto para Inexigibilidade).');
       return;
+    }
+    if (modalidadeId === 9 && !pdfPath) {
+      if (!window.confirm('Nenhum arquivo PDF foi anexado para esta Inexigibilidade. Deseja enviar sem PDF?')) {
+        return;
+      }
     }
 
     try {
@@ -356,12 +414,21 @@ export const EditalForm: React.FC = () => {
         await editalService.updateEdital(currentId, payload);
       }
 
-      // Envia à AUDESP
+      // Envia à AUDESP (já consulta o protocolo automaticamente no backend)
       const res = await editalService.enviarEdital(currentId);
-      toast.success(res.mensagem || `Edital transmitido com sucesso! Protocolo: ${res.protocolo}`);
       setEditalStatus('sent');
       setProtocolo(res.protocolo);
-      setStatusProtocolo('Recebido');
+      setStatusProtocolo(res.status_protocolo || 'Recebido');
+      if (res.dados || res.detalhes) {
+        setDetalhesProtocolo(res.dados || res.detalhes);
+      }
+      if (res.historico_protocolo) {
+        setHistoricoProtocolo(res.historico_protocolo);
+      }
+      notificarResultadoProtocolo(res, {
+        prefixoSucesso: res.mensagem || 'Edital transmitido com sucesso!',
+        isTransmissao: true,
+      });
       navigate(`/editais/${currentId}`, { replace: true });
     } catch (err: any) {
       const detail = err.response?.data?.detail;
@@ -429,8 +496,11 @@ export const EditalForm: React.FC = () => {
       setSending(true);
       const res = await editalService.consultarProtocolo(Number(id));
       setStatusProtocolo(res.status);
-      setDetalhesProtocolo(res.dados);
-      toast.success(`Situação atualizada: ${res.status}`);
+      setDetalhesProtocolo(res.dados || res.detalhes);
+      if (res.historico) {
+        setHistoricoProtocolo(res.historico);
+      }
+      notificarResultadoProtocolo(res, { isTransmissao: false });
     } catch (err: any) {
       toast.error('Erro ao consultar situação do protocolo');
     } finally {
@@ -440,7 +510,12 @@ export const EditalForm: React.FC = () => {
 
   const handleRetornarRascunho = async () => {
     if (!id) return;
-    if (!window.confirm('Deseja retornar este edital para rascunho para reedição?')) return;
+    const totalDep = (dependentes.licitacoes || 0) + (dependentes.atas || 0) + (dependentes.ajustes || 0);
+    const msgConfirm =
+      totalDep > 0
+        ? `Atenção: este edital possui ${dependentes.licitacoes} licitação(ões), ${dependentes.atas} ata(s) e ${dependentes.ajustes} ajuste(s) vinculados. Deseja realmente retornar este edital para rascunho?`
+        : 'Deseja retornar este edital para rascunho para reedição?';
+    if (!window.confirm(msgConfirm)) return;
     try {
       await editalService.retornarRascunho(Number(id));
       setEditalStatus('draft');
@@ -497,12 +572,19 @@ export const EditalForm: React.FC = () => {
       return;
     }
 
+    const sanitizedPub: Publicacao = {
+      veiculoPublicacao: Number(pubForm.veiculoPublicacao),
+      dataPublicacao: pubForm.dataPublicacao,
+      ...(pubForm.veiculoPublicacao === 5 && pubForm.idContratacaoPNCP ? { idContratacaoPNCP: stripMask(pubForm.idContratacaoPNCP) } : {}),
+      ...(pubForm.veiculoPublicacao === 10 && pubForm.veiculoPublicacaoNome?.trim() ? { veiculoPublicacaoNome: pubForm.veiculoPublicacaoNome.trim() } : {}),
+    };
+
     if (editingPubIndex !== null) {
       const updated = [...publicacoes];
-      updated[editingPubIndex] = pubForm;
+      updated[editingPubIndex] = sanitizedPub;
       setPublicacoes(updated);
     } else {
-      setPublicacoes([...publicacoes, pubForm]);
+      setPublicacoes([...publicacoes, sanitizedPub]);
     }
     setShowPubModal(false);
   };
@@ -511,7 +593,13 @@ export const EditalForm: React.FC = () => {
   const handleOpenItemModal = (index?: number) => {
     if (index !== undefined) {
       setEditingItemIndex(index);
-      setItemForm({ ...itens[index] });
+      const current = itens[index];
+      setItemForm({
+        ...current,
+        itemCategoriaId: isLeilao
+          ? ([1, 2].includes(Number(current.itemCategoriaId)) ? Number(current.itemCategoriaId) : 2)
+          : 3,
+      });
     } else {
       setEditingItemIndex(null);
       setItemForm({
@@ -602,30 +690,53 @@ export const EditalForm: React.FC = () => {
 
       {/* Protocol Banner if Sent */}
       {isSent && (
-        <div className={`alert ${statusProtocolo?.toLowerCase().includes('rejeitado') ? 'alert-danger' : 'alert-success'} d-flex justify-content-between align-items-center shadow-sm mb-4`}>
-          <div>
-            <h5 className="alert-heading mb-1 d-flex align-items-center gap-2">
-              <CheckCircle2 size={20} /> Protocolo AUDESP: <strong>{protocolo}</strong>
-            </h5>
-            <p className="mb-0 small">
-              Situação no Tribunal de Contas: <strong>{statusProtocolo || 'Recebido'}</strong>
-            </p>
-            {detalhesProtocolo?.erros?.length > 0 && (
-              <div className="mt-2 pt-2 border-top border-danger-subtle small">
-                <strong>Erros / Notificações do TCESP:</strong>
-                <ul className="mb-0 ps-3 mt-1">
-                  {detalhesProtocolo.erros.map((err: any, idx: number) => (
-                    <li key={idx}>{err.mensagem || err.campo || JSON.stringify(err)}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
+        <div className={`alert ${statusProtocolo?.toLowerCase().includes('rejeitado') ? 'alert-danger' : 'alert-success'} shadow-sm mb-4`}>
+          <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+              <h5 className="alert-heading mb-1 d-flex align-items-center gap-2">
+                <CheckCircle2 size={20} /> Protocolo AUDESP: <strong>{protocolo}</strong>
+              </h5>
+              <p className="mb-0 small">
+                Situação no Tribunal de Contas: <strong>{statusProtocolo || 'Recebido'}</strong>
+              </p>
+            </div>
+            <div className="d-flex align-items-center gap-2">
+              <button
+                type="button"
+                onClick={handleConsultarProtocolo}
+                disabled={sending}
+                className="btn btn-sm btn-light border d-flex align-items-center gap-1"
+              >
+                <RefreshCw size={14} className={sending ? 'spin' : ''} /> Consultar Protocolo
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowHistoricoModal(true)}
+                className="btn btn-sm btn-light border d-flex align-items-center gap-1"
+              >
+                <History size={14} /> Histórico ({historicoProtocolo.length})
+              </button>
+              <span className="badge bg-white text-dark fs-6 px-3 py-2 border">
+                Fase IV — TCESP
+              </span>
+            </div>
           </div>
-          <span className="badge bg-white text-dark fs-6 px-3 py-2 border">
-            Fase IV — TCESP
-          </span>
+
+          <ProtocoloErrosAlert
+            detalhesProtocolo={detalhesProtocolo}
+            statusProtocolo={statusProtocolo}
+            className="mt-3"
+          />
         </div>
       )}
+
+      <HistoricoProtocoloModal
+        show={showHistoricoModal}
+        onHide={() => setShowHistoricoModal(false)}
+        protocolo={protocolo}
+        codigoDocumento={codigoEdital}
+        historico={historicoProtocolo}
+      />
 
       {/* Seção 1: Descritor */}
       <Card title="1. Descritor do Documento" className="mb-4">
@@ -1110,17 +1221,50 @@ export const EditalForm: React.FC = () => {
         title="4. Lista de Itens da Contratação"
         className="mb-4"
         actions={
-          !isSent && (
-            <button
-              type="button"
-              onClick={() => handleOpenItemModal()}
-              className="btn btn-sm btn-outline-success d-flex align-items-center gap-1"
-            >
-              <Plus size={14} /> Adicionar Item de Compra
-            </button>
-          )
+          <div className="d-flex align-items-center gap-2">
+            {itens.length > 0 && (
+              <span className="badge bg-success bg-opacity-10 text-success border border-success-subtle px-2 py-1 font-monospace">
+                Total: {formatBRL(itens.reduce((acc, curr) => acc + (curr.valorTotal || 0), 0))}
+              </span>
+            )}
+            {!isSent && (
+              <button
+                type="button"
+                onClick={() => handleOpenItemModal()}
+                className="btn btn-sm btn-outline-success d-flex align-items-center gap-1"
+              >
+                <Plus size={14} /> Adicionar Item de Compra
+              </button>
+            )}
+          </div>
         }
       >
+        {isLeilao && itensComCategoriaInvalidaLeilao > 0 && !isSent && (
+          <div className="alert alert-warning d-flex flex-wrap justify-content-between align-items-center gap-2 py-2 px-3 mb-3 small">
+            <div className="d-flex align-items-center gap-2">
+              <AlertTriangle size={16} />
+              <span>
+                Para Leilão, os itens exigem categoria <strong>1 – Bens Imóveis</strong> ou <strong>2 – Bens Móveis</strong> ({itensComCategoriaInvalidaLeilao} item(ns) pendente(s)).
+              </span>
+            </div>
+            <div className="d-flex gap-2">
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-dark py-0 px-2"
+                onClick={() => handleDefinirCategoriaLeilaoEmLote(2)}
+              >
+                Definir todos como Bens Móveis (2)
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-dark py-0 px-2"
+                onClick={() => handleDefinirCategoriaLeilaoEmLote(1)}
+              >
+                Definir todos como Bens Imóveis (1)
+              </button>
+            </div>
+          </div>
+        )}
         {itens.length === 0 ? (
           <div className="alert alert-warning py-3 text-center mb-0 small">
             <AlertTriangle size={20} className="mb-1 text-warning" />
@@ -1323,7 +1467,15 @@ export const EditalForm: React.FC = () => {
                   <Form.Select
                     className="form-select form-select-sm"
                     value={pubForm.veiculoPublicacao}
-                    onChange={(e) => setPubForm({ ...pubForm, veiculoPublicacao: Number(e.target.value) })}
+                    onChange={(e) => {
+                      const novoVeiculo = Number(e.target.value);
+                      setPubForm({
+                        ...pubForm,
+                        veiculoPublicacao: novoVeiculo,
+                        ...(novoVeiculo !== 5 ? { idContratacaoPNCP: '' } : {}),
+                        ...(novoVeiculo !== 10 ? { veiculoPublicacaoNome: '' } : {}),
+                      });
+                    }}
                   >
                     {dominios && Object.entries(dominios.veiculosPublicacao).map(([val, label]) => (
                       <option key={val} value={val}>{label}</option>
@@ -1359,33 +1511,24 @@ export const EditalForm: React.FC = () => {
                   </div>
                 )}
 
-                <div className="mb-3">
-                  <Form.Label className="form-label small fw-bold text-secondary">
-                    Nome / Identificação do Veículo de Publicação
-                    {pubForm.veiculoPublicacao === 10 && <span className="text-danger"> *</span>}
-                  </Form.Label>
-                  <Form.Control
-                    type="text"
-                    className="form-control form-control-sm"
-                    placeholder={
-                      pubForm.veiculoPublicacao === 9
-                        ? 'Ex: https://www.santos.sp.gov.br ou Portal da Transparência'
-                        : pubForm.veiculoPublicacao === 10
-                        ? 'Nome do jornal ou veículo (obrigatório para "Outros")'
-                        : 'Identificação complementar do veículo/edição (opcional)'
-                    }
-                    value={pubForm.veiculoPublicacaoNome || ''}
-                    onChange={(e) => setPubForm({ ...pubForm, veiculoPublicacaoNome: e.target.value })}
-                    maxLength={100}
-                  />
-                  <span className="text-muted" style={{ fontSize: '0.72rem' }}>
-                    {pubForm.veiculoPublicacao === 10
-                      ? 'Obrigatório para a opção "Outros".'
-                      : pubForm.veiculoPublicacao === 9
-                      ? 'Informe o link ou nome do portal/site.'
-                      : 'Opcional. Nome do diário, jornal ou veículo utilizado.'}
-                  </span>
-                </div>
+                {pubForm.veiculoPublicacao === 10 && (
+                  <div className="mb-3">
+                    <Form.Label className="form-label small fw-bold text-secondary">
+                      Nome / Descrição do Veículo de Publicação <span className="text-danger">*</span>
+                    </Form.Label>
+                    <Form.Control
+                      type="text"
+                      className="form-control form-control-sm"
+                      placeholder="Nome do jornal ou veículo (obrigatório para 'Outros')"
+                      value={pubForm.veiculoPublicacaoNome || ''}
+                      onChange={(e) => setPubForm({ ...pubForm, veiculoPublicacaoNome: e.target.value })}
+                      maxLength={100}
+                    />
+                    <span className="text-muted" style={{ fontSize: '0.72rem' }}>
+                      Exigido pelo AUDESP apenas para a opção 'Outros' (veículo 10).
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowPubModal(false)}>
@@ -1413,7 +1556,7 @@ export const EditalForm: React.FC = () => {
               </div>
               <div className="modal-body">
                 <div className="row g-3">
-                  <div className="col-md-4">
+                  <div className={isLeilao ? 'col-md-4' : 'col-md-6'}>
                     <Form.Label className="form-label small fw-bold text-secondary">Tipo (Material / Serviço) *</Form.Label>
                     <Form.Select
                       className="form-select form-select-sm"
@@ -1431,26 +1574,21 @@ export const EditalForm: React.FC = () => {
                     )}
                   </div>
 
-                  <div className="col-md-4">
-                    <Form.Label className="form-label small fw-bold text-secondary">Categoria do Item *</Form.Label>
-                    <Form.Select
-                      className="form-select form-select-sm"
-                      value={isLeilao ? itemForm.itemCategoriaId : 3}
-                      onChange={(e) => setItemForm({ ...itemForm, itemCategoriaId: Number(e.target.value) })}
-                      disabled={!isLeilao}
-                    >
-                      {dominios && Object.entries(dominios.categoriasItem).map(([val, label]) => (
-                        <option key={val} value={val}>{label}</option>
-                      ))}
-                    </Form.Select>
-                    {!isLeilao && (
-                      <span className="text-muted" style={{ fontSize: '0.72rem' }}>
-                        Para modalidades normais, deve ser 'Não se aplica'.
-                      </span>
-                    )}
-                  </div>
+                  {isLeilao && (
+                    <div className="col-md-4">
+                      <Form.Label className="form-label small fw-bold text-secondary">Categoria do Item (Leilão) *</Form.Label>
+                      <Form.Select
+                        className="form-select form-select-sm"
+                        value={[1, 2].includes(Number(itemForm.itemCategoriaId)) ? itemForm.itemCategoriaId : 2}
+                        onChange={(e) => setItemForm({ ...itemForm, itemCategoriaId: Number(e.target.value) })}
+                      >
+                        <option value={1}>1 – Bens Imóveis</option>
+                        <option value={2}>2 – Bens Móveis</option>
+                      </Form.Select>
+                    </div>
+                  )}
 
-                  <div className="col-md-4">
+                  <div className={isLeilao ? 'col-md-4' : 'col-md-6'}>
                     <Form.Label className="form-label small fw-bold text-secondary">Critério de Julgamento *</Form.Label>
                     <Form.Select
                       className="form-select form-select-sm"

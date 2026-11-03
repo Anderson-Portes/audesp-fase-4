@@ -5,7 +5,16 @@ from datetime import datetime, date, timezone
 from fastapi import HTTPException
 from sqlmodel import Session, select, or_
 
-from core.audesp_client import enviar_ajuste_audesp, consultar_protocolo_audesp
+from core.audesp_client import (
+    enviar_ajuste_audesp,
+    consultar_protocolo_audesp,
+    extrair_erros_estruturados_audesp,
+    extrair_mensagens_protocolo_audesp,
+)
+from modules.protocolos.ProtocoloService import (
+    consultar_e_registrar_protocolo,
+    listar_historico_protocolo,
+)
 from core.audesp_domains import MUNICIPIOS_AUDESP, ENTIDADES_AUDESP
 from modules.ajustes.Ajuste import AjusteContrato
 from modules.ajustes.AjusteDomains import (
@@ -17,6 +26,12 @@ from modules.ajustes.AjusteDomains import (
 )
 from modules.licitacoes.Licitacao import Licitacao
 from modules.editais.Edital import Edital
+from modules.atas.Ata import AtaRegistroPreco
+from modules.licitacoes.LicitacaoDomains import (
+    DOMINIO_FONTES_RECURSO,
+    selecionar_licitacao_enviada,
+    extrair_numeros_itens_licitacao,
+)
 
 
 class AjusteService:
@@ -30,6 +45,7 @@ class AjusteService:
             "categoriasProcesso": DOMINIO_CATEGORIA_PROCESSO,
             "tiposObjetoContrato": DOMINIO_TIPO_OBJETO_CONTRATO,
             "objetosPorCategoria": OBJETOS_POR_CATEGORIA,
+            "fontesRecurso": DOMINIO_FONTES_RECURSO,
             "municipios": MUNICIPIOS_AUDESP,
             "entidades": ENTIDADES_AUDESP
         }
@@ -70,9 +86,20 @@ class AjusteService:
         except Exception:
             documento = {}
 
+        detalhes_prot = None
+        if ajuste.detalhes_protocolo:
+            try:
+                detalhes_prot = json.loads(ajuste.detalhes_protocolo)
+            except Exception:
+                detalhes_prot = ajuste.detalhes_protocolo
+
         return {
             "ajuste": ajuste,
-            "documento": documento
+            "documento": documento,
+            "parsed_detalhes_protocolo": detalhes_prot,
+            "erros_formatados": extrair_mensagens_protocolo_audesp(detalhes_prot),
+            "erros_detalhados": extrair_erros_estruturados_audesp(detalhes_prot),
+            "historico_protocolo": listar_historico_protocolo(session, "ajuste", ajuste.id, ajuste.protocolo),
         }
 
     @staticmethod
@@ -184,33 +211,72 @@ class AjusteService:
         except Exception:
             raise HTTPException(status_code=400, detail="JSON do ajuste está corrompido.")
 
-        # Verifica se o edital vinculado é SRP
+        adesao = bool(documento.get("descritor", {}).get("adesaoParticipacao", False))
         is_srp = False
-        if ajuste.edital_id:
-            edital_vinculado = session.get(Edital, ajuste.edital_id)
-            if edital_vinculado and edital_vinculado.documento_json:
-                try:
-                    ed_doc = json.loads(edital_vinculado.documento_json)
-                    is_srp = bool(ed_doc.get("srp", False))
-                except Exception:
-                    pass
+        erros_fluxo: List[str] = []
+        numeros_itens_lic = None
+        ata_vinculada_status = None
 
-        erros_validacao = validar_regras_negocio_ajuste(documento, edital_srp=is_srp)
+        if ajuste.ata_id:
+            ata_vinc = session.get(AtaRegistroPreco, ajuste.ata_id)
+            if ata_vinc:
+                ata_vinculada_status = ata_vinc.status
 
-        # Cross-validation com Licitacao vinculada (dispensada em adesão/participação externa)
-        adesao = documento.get("descritor", {}).get("adesaoParticipacao", False)
-        if not adesao and ajuste.licitacao_id:
-            licitacao = session.get(Licitacao, ajuste.licitacao_id)
-            if licitacao and licitacao.documento_json:
-                try:
-                    lic_doc = json.loads(licitacao.documento_json)
-                    lic_itens = {str(item.get("numeroItem")) for item in lic_doc.get("item", []) if item.get("numeroItem") is not None}
-                    ajuste_itens = [str(item.get("numeroItem")) for item in documento.get("itens", []) if item.get("numeroItem") is not None]
-                    for item_num in ajuste_itens:
-                        if item_num not in lic_itens:
-                            erros_validacao.append(f"O item '{item_num}' do ajuste não existe na licitação vinculada.")
-                except Exception:
-                    pass
+        if not adesao:
+            edital_vinculado = session.get(Edital, ajuste.edital_id) if ajuste.edital_id else None
+            if not edital_vinculado and ajuste.codigo_edital:
+                edital_vinculado = session.exec(
+                    select(Edital).where(
+                        Edital.codigo_edital == ajuste.codigo_edital,
+                        Edital.municipio == ajuste.municipio,
+                        Edital.entidade == ajuste.entidade
+                    )
+                ).first()
+
+            if not edital_vinculado:
+                erros_fluxo.append("O edital vinculado não foi encontrado.")
+            else:
+                if edital_vinculado.status != "sent":
+                    erros_fluxo.append("O edital ainda não foi enviado ao AUDESP.")
+                if edital_vinculado.documento_json:
+                    try:
+                        ed_doc = json.loads(edital_vinculado.documento_json)
+                        is_srp = bool(ed_doc.get("srp", False))
+                    except Exception:
+                        pass
+
+                licitacoes_edital = list(
+                    session.exec(
+                        select(Licitacao).where(
+                            or_(
+                                Licitacao.edital_id == edital_vinculado.id,
+                                (Licitacao.codigo_edital == edital_vinculado.codigo_edital) &
+                                (Licitacao.municipio == edital_vinculado.municipio) &
+                                (Licitacao.entidade == edital_vinculado.entidade)
+                            )
+                        )
+                    ).all()
+                )
+                if not licitacoes_edital:
+                    erros_fluxo.append("O edital ainda não tem licitação.")
+                else:
+                    lic_enviada = selecionar_licitacao_enviada(licitacoes_edital)
+                    if not lic_enviada:
+                        erros_fluxo.append("A licitação do edital ainda não foi enviada ao AUDESP.")
+                    else:
+                        try:
+                            lic_doc = json.loads(lic_enviada.documento_json) if lic_enviada.documento_json else {}
+                        except Exception:
+                            lic_doc = {}
+                        numeros_itens_lic = extrair_numeros_itens_licitacao(lic_doc)
+
+        erros_validacao = erros_fluxo + validar_regras_negocio_ajuste(
+            documento,
+            edital_srp=is_srp,
+            numeros_itens_licitacao=numeros_itens_lic,
+            ata_id_vinculada=ajuste.ata_id,
+            ata_vinculada_status=ata_vinculada_status
+        )
 
         if erros_validacao and not forcar:
             raise HTTPException(
@@ -230,17 +296,53 @@ class AjusteService:
         )
 
         if resultado.get("sucesso"):
+            protocolo = resultado.get("protocolo")
             ajuste.status = "sent"
-            ajuste.protocolo = resultado.get("protocolo")
+            ajuste.protocolo = protocolo
             ajuste.status_protocolo = "Recebido"
             ajuste.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
             ajuste.updated_at = datetime.now(timezone.utc)
             session.commit()
             session.refresh(ajuste)
+
+            # Consulta automaticamente o protocolo logo após a transmissão
+            consulta_auto = None
+            if protocolo:
+                consulta_auto = consultar_e_registrar_protocolo(
+                    session=session,
+                    token=token_audesp,
+                    modulo="ajuste",
+                    registro_id=ajuste.id,
+                    codigo_documento=ajuste.codigo_contrato or f"{ajuste.numero_contrato_empenho}/{ajuste.ano_contrato}",
+                    protocolo=protocolo,
+                    origem="envio_automatico",
+                    status_padrao="Recebido",
+                )
+                if consulta_auto.get("sucesso"):
+                    ajuste.status_protocolo = consulta_auto.get("status") or "Recebido"
+                    ajuste.detalhes_protocolo = json.dumps(consulta_auto.get("dados", {}), ensure_ascii=False)
+                    ajuste.updated_at = datetime.now(timezone.utc)
+                    session.add(ajuste)
+                    session.commit()
+                    session.refresh(ajuste)
+
+            erros_formatados = consulta_auto.get("erros_formatados", []) if consulta_auto else []
+            erros_detalhados = consulta_auto.get("erros_detalhados", []) if consulta_auto else []
+            is_rejeitado = bool(consulta_auto.get("is_rejeitado")) if consulta_auto else False
+            possui_erros = bool(consulta_auto.get("possui_erros")) if consulta_auto else False
+
             return {
                 "sucesso": True,
                 "mensagem": "Ajuste/Contrato transmitido com sucesso ao TCESP!",
                 "protocolo": ajuste.protocolo,
+                "status_protocolo": ajuste.status_protocolo or "Recebido",
+                "is_rejeitado": is_rejeitado,
+                "possui_erros": possui_erros,
+                "erros_formatados": erros_formatados,
+                "erros_detalhados": erros_detalhados,
+                "dados": consulta_auto.get("dados") if consulta_auto else resultado.get("dados"),
+                "detalhes": consulta_auto.get("dados") if consulta_auto else resultado.get("dados"),
+                "historico_protocolo": consulta_auto.get("historico", []) if consulta_auto else [],
                 "ajuste": ajuste
             }
         else:
@@ -261,16 +363,25 @@ class AjusteService:
         ajuste_id: int,
         token_audesp: str
     ) -> Dict[str, Any]:
-        """Consulta o processamento do protocolo no TCESP."""
+        """Consulta o processamento do protocolo no TCESP e grava no histórico."""
         ajuste = session.get(AjusteContrato, ajuste_id)
         if not ajuste or not ajuste.protocolo:
             raise HTTPException(status_code=400, detail="Este ajuste não possui protocolo gerado para consulta.")
 
-        resultado = consultar_protocolo_audesp(token=token_audesp, protocolo=ajuste.protocolo)
-        if resultado.get("sucesso"):
-            novo_status = resultado.get("status")
+        consulta = consultar_e_registrar_protocolo(
+            session=session,
+            token=token_audesp,
+            modulo="ajuste",
+            registro_id=ajuste.id,
+            codigo_documento=ajuste.codigo_contrato or f"{ajuste.numero_contrato_empenho}/{ajuste.ano_contrato}",
+            protocolo=ajuste.protocolo,
+            origem="consulta_manual",
+            status_padrao=ajuste.status_protocolo or "Recebido",
+        )
+        if consulta.get("sucesso"):
+            novo_status = consulta.get("status")
             ajuste.status_protocolo = novo_status
-            ajuste.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
+            ajuste.detalhes_protocolo = json.dumps(consulta.get("dados", {}), ensure_ascii=False)
             ajuste.updated_at = datetime.now(timezone.utc)
             session.commit()
             session.refresh(ajuste)
@@ -278,13 +389,27 @@ class AjusteService:
                 "sucesso": True,
                 "protocolo": ajuste.protocolo,
                 "status": novo_status,
-                "detalhes": resultado.get("dados")
+                "is_rejeitado": consulta.get("is_rejeitado", False),
+                "possui_erros": consulta.get("possui_erros", False),
+                "erros_formatados": consulta.get("erros_formatados", []),
+                "erros_detalhados": consulta.get("erros_detalhados", []),
+                "dados": consulta.get("dados"),
+                "detalhes": consulta.get("dados"),
+                "historico": consulta.get("historico", []),
             }
         else:
             return {
                 "sucesso": False,
-                "mensagem": resultado.get("mensagem", "Erro ao consultar protocolo.")
+                "mensagem": consulta.get("mensagem", "Erro ao consultar protocolo.")
             }
+
+    @staticmethod
+    def obter_historico_protocolo(session: Session, ajuste_id: int) -> List[Dict[str, Any]]:
+        """Retorna o histórico de consultas de protocolo de um ajuste."""
+        ajuste = session.get(AjusteContrato, ajuste_id)
+        if not ajuste:
+            raise HTTPException(status_code=404, detail="Ajuste não encontrado.")
+        return listar_historico_protocolo(session, "ajuste", ajuste.id, ajuste.protocolo)
 
     @staticmethod
     def retornar_rascunho(session: Session, ajuste_id: int) -> AjusteContrato:

@@ -1,0 +1,18 @@
+# Arquivos e imagens de build
+*.tar.gz
+build.sh
+
+# Submódulos e diretórios locais
+audesp-api/
+
+# Ambientes virtuais e caches
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+node_modules/
+dist/
+.DS_Store
+*.log
+.env
+.env.bak

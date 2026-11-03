@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Licitacao, DominiosLicitacaoResponse } from '../types/licitacao';
+import type { Licitacao, DominiosLicitacaoResponse, ReferenciaEditalResponse } from '../types/licitacao';
 
 export const licitacaoService = {
   async getDominios(): Promise<DominiosLicitacaoResponse> {
@@ -7,11 +7,17 @@ export const licitacaoService = {
     return response.data;
   },
 
-  async getLicitacoes(status?: 'draft' | 'sent', search?: string): Promise<Licitacao[]> {
-    const params: Record<string, string> = {};
+  async getLicitacoes(status?: 'draft' | 'sent', search?: string, editalId?: number): Promise<Licitacao[]> {
+    const params: Record<string, string | number> = {};
     if (status) params.status = status;
     if (search) params.search = search;
+    if (editalId) params.edital_id = editalId;
     const response = await api.get<Licitacao[]>('/api/licitacoes', { params });
+    return response.data;
+  },
+
+  async getReferenciaEdital(editalId: number): Promise<ReferenciaEditalResponse> {
+    const response = await api.get<ReferenciaEditalResponse>(`/api/licitacoes/referencia-edital/${editalId}`);
     return response.data;
   },
 
@@ -55,6 +61,13 @@ export const licitacaoService = {
     mensagem: string;
     protocolo: string;
     status_protocolo: string;
+    is_rejeitado?: boolean;
+    possui_erros?: boolean;
+    erros_formatados?: string[];
+    erros_detalhados?: any[];
+    dados?: any;
+    detalhes?: any;
+    historico_protocolo?: any[];
   }> {
     const response = await api.post(`/api/licitacoes/${id}/enviar`);
     return response.data;
@@ -64,9 +77,20 @@ export const licitacaoService = {
     sucesso: boolean;
     protocolo: string;
     status: string;
+    is_rejeitado?: boolean;
+    possui_erros?: boolean;
+    erros_formatados?: string[];
+    erros_detalhados?: any[];
     dados?: any;
+    detalhes?: any;
+    historico?: any[];
   }> {
     const response = await api.post(`/api/licitacoes/${id}/consultar-protocolo`);
+    return response.data;
+  },
+
+  async getHistoricoProtocolo(id: number): Promise<any[]> {
+    const response = await api.get(`/api/licitacoes/${id}/historico-protocolo`);
     return response.data;
   },
 

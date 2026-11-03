@@ -48,28 +48,28 @@ ENTIDADES_AUDESP: List[Dict[str, Any]] = [
     },
     {
         "codigo": 3,
-        "municipio": 545,
+        "municipio": 7071,
         "nome": "CET - Companhia de Engenharia de Tráfego de Santos",
         "tipo": "Empresa Pública",
         "cnpj": "50.419.866/0001-44"
     },
     {
         "codigo": 4,
-        "municipio": 545,
+        "municipio": 7071,
         "nome": "IPREV - Instituto de Previdência Social dos Servidores de Santos",
         "tipo": "Autarquia Previdenciária",
         "cnpj": "07.824.238/0001-51"
     },
     {
         "codigo": 5,
-        "municipio": 545,
+        "municipio": 7071,
         "nome": "FAPES - Fundação Arquivo e Memória de Santos",
         "tipo": "Fundação Pública",
         "cnpj": "03.012.345/0001-90"
     },
     {
         "codigo": 6,
-        "municipio": 545,
+        "municipio": 7071,
         "nome": "COHAB Santista - Companhia de Habitação da Baixada Santista",
         "tipo": "Sociedade de Economia Mista",
         "cnpj": "58.199.118/0001-09"

@@ -14,6 +14,7 @@ import { AtasList } from './pages/Atas/AtasList';
 import { AtaForm } from './pages/Atas/AtaForm';
 import { AjustesList } from './pages/Ajustes/AjustesList';
 import { AjusteForm } from './pages/Ajustes/AjusteForm';
+import { ProtocolosList } from './pages/Protocolos/ProtocolosList';
 
 const queryClient = new QueryClient();
 
@@ -40,6 +41,7 @@ function App() {
               <Route path="/ajustes" element={<AjustesList />} />
               <Route path="/ajustes/novo" element={<AjusteForm />} />
               <Route path="/ajustes/:id" element={<AjusteForm />} />
+              <Route path="/protocolos" element={<ProtocolosList />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

@@ -11,14 +11,24 @@ import {
   CheckCircle2, 
   RefreshCw, 
   RotateCcw,
-  Link
+  Link,
+  History
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Container, Form } from 'react-bootstrap';
 
 import { PageHeader } from '../../components/PageHeader/PageHeader';
 import { CardBox as Card } from '../../components/CardBox/CardBox';
-import { MunicipioEntidadeSelect } from '../../components/MunicipioEntidadeSelect/MunicipioEntidadeSelect';
+import {
+  ProtocoloErrosAlert,
+  HistoricoProtocoloModal,
+  notificarResultadoProtocolo,
+} from '../../components/ProtocoloInfo/ProtocoloComponents';
+import {
+  MunicipioEntidadeSelect,
+  getSavedMunicipio,
+  getSavedEntidade
+} from '../../components/MunicipioEntidadeSelect/MunicipioEntidadeSelect';
 import { licitacaoService } from '../../services/licitacaoService';
 import { editalService } from '../../services/editalService';
 import type { 
@@ -28,6 +38,7 @@ import type {
   IndiceEconomico
 } from '../../types/licitacao';
 import type { Edital } from '../../types/edital';
+import type { HistoricoProtocoloItem } from '../../utils/protocoloFormatter';
 import { 
   formatBRL, 
   formatPncpMask, 
@@ -49,11 +60,17 @@ export const LicitacaoForm: React.FC = () => {
   const [protocolo, setProtocolo] = useState<string | null>(null);
   const [statusProtocolo, setStatusProtocolo] = useState<string | null>(null);
   const [detalhesProtocolo, setDetalhesProtocolo] = useState<any>(null);
+  const [historicoProtocolo, setHistoricoProtocolo] = useState<HistoricoProtocoloItem[]>([]);
+  const [showHistoricoModal, setShowHistoricoModal] = useState<boolean>(false);
+  const [dependentes, setDependentes] = useState<{ atas: number; ajustes: number }>({
+    atas: 0,
+    ajustes: 0
+  });
 
   // 1. Descritor & Vínculo com Edital
   const [editalId, setEditalId] = useState<number | undefined>(undefined);
-  const [municipio, setMunicipio] = useState<number>(7071);
-  const [entidade, setEntidade] = useState<number>(11310);
+  const [municipio, setMunicipio] = useState<number>(() => getSavedMunicipio(7071));
+  const [entidade, setEntidade] = useState<number>(() => getSavedEntidade(11310));
   const [codigoEdital, setCodigoEdital] = useState<string>('');
   const [retificacao, setRetificacao] = useState<boolean>(false);
   const [numeroCompra, setNumeroCompra] = useState<string>('');
@@ -145,7 +162,11 @@ export const LicitacaoForm: React.FC = () => {
           setProtocolo(lic.protocolo || null);
           setStatusProtocolo(lic.status_protocolo || null);
           setDetalhesProtocolo(lic.parsed_detalhes_protocolo || null);
+          setHistoricoProtocolo((lic as any).historico_protocolo || []);
           setEditalId(lic.edital_id);
+          if (lic.dependentes) {
+            setDependentes(lic.dependentes);
+          }
           setMunicipio(lic.municipio);
           setEntidade(lic.entidade);
           setCodigoEdital(lic.codigo_edital);
@@ -292,7 +313,7 @@ export const LicitacaoForm: React.FC = () => {
         tipoProposta: Number(it.tipoProposta),
         licitantes: (it.licitantes || []).map((lic) => ({
           tipoPessoaId: lic.tipoPessoaId,
-          niPessoa: stripMask(lic.niPessoa),
+          niPessoa: lic.tipoPessoaId === 'PE' ? lic.niPessoa.trim() : stripMask(lic.niPessoa),
           ...(lic.tipoPessoaId === 'PE' && lic.nomeRazaoSocial?.trim() ? { nomeRazaoSocial: lic.nomeRazaoSocial.trim() } : {}),
           declaracaoMEouEPP: Number(lic.declaracaoMEouEPP),
           resultadoHabilitacao: Number(lic.resultadoHabilitacao),
@@ -328,8 +349,9 @@ export const LicitacaoForm: React.FC = () => {
     }
 
     doc.declaracaoRecursosContratacao = Boolean(declaracaoRecursosContratacao);
-    if (declaracaoRecursosContratacao && fontesRecurso.length > 0) {
-      doc.fonteRecursosContratacao = fontesRecurso.map(f => Number(f));
+    // A fonte só é obrigatória com a declaração; em registro de preços (SRP) ela pode ser informada sem a declaração
+    if (fontesRecurso.length > 0) {
+      doc.fonteRecursosContratacao = [...fontesRecurso].map(f => Number(f)).sort((a, b) => a - b);
     }
 
     if (contratacaoConduzida) {
@@ -386,9 +408,82 @@ export const LicitacaoForm: React.FC = () => {
     }
   };
 
+  const editalSelecionado = editaisDisponiveis.find((e) => e.id === editalId);
+  const editalNaoEnviado = Boolean(editalSelecionado && editalSelecionado.status !== 'sent');
+  const itensEditalSelecionado: any[] = (() => {
+    if (!editalSelecionado) return [];
+    if (editalSelecionado.parsed_documento?.itensCompra) {
+      return editalSelecionado.parsed_documento.itensCompra;
+    }
+    if (editalSelecionado.documento_json) {
+      try {
+        const parsed = typeof editalSelecionado.documento_json === 'string'
+          ? JSON.parse(editalSelecionado.documento_json)
+          : editalSelecionado.documento_json;
+        return parsed?.itensCompra || [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  })();
+
+  const numerosItensFaltantes: number[] = (() => {
+    if (!itensEditalSelecionado.length) return [];
+    const existentes = new Set(itens.map((it) => Number(it.numeroItem)));
+    return itensEditalSelecionado
+      .map((it: any) => Number(it.numeroItem))
+      .filter((num: number) => Number.isFinite(num) && !existentes.has(num))
+      .sort((a: number, b: number) => a - b);
+  })();
+
+  const handleCadastrarFaltantesComoDesertos = () => {
+    if (!numerosItensFaltantes.length) return;
+    if (
+      !window.confirm(
+        `Os itens/lotes ${numerosItensFaltantes.join(', ')} do edital serão incluídos na licitação com a situação "4 – Deserto" e sem licitantes. Deseja continuar?`
+      )
+    ) {
+      return;
+    }
+    const hojeIso = new Date().toISOString().split('T')[0];
+    const faltantesSet = new Set(numerosItensFaltantes);
+    const tipoOrcamentoPadrao = itens[0]?.tipoOrcamento ?? 2;
+    const tipoPropostaPadrao = itens[0]?.tipoProposta ?? (tipoOrcamentoPadrao === 0 ? 2 : tipoOrcamentoPadrao);
+    const tipoValorPadrao = itens[0]?.tipoValor ?? (tipoPropostaPadrao === 3 ? 'P' : 'M');
+    const dataSituacaoPadrao = itens[0]?.dataSituacaoItem || hojeIso;
+    const dataOrcamentoPadrao = itens[0]?.dataOrcamento || dataSituacaoPadrao;
+
+    const novosItens: ItemLicitacao[] = itensEditalSelecionado
+      .filter((itEd: any) => faltantesSet.has(Number(itEd.numeroItem)))
+      .map((itEd: any) => ({
+        numeroItem: Number(itEd.numeroItem),
+        tipoOrcamento: tipoOrcamentoPadrao,
+        ...(tipoOrcamentoPadrao !== 0
+          ? {
+              valor: Number(Number(itEd.valorUnitarioEstimado || itEd.valorTotal || 0).toFixed(4)),
+              dataOrcamento: dataOrcamentoPadrao,
+            }
+          : {}),
+        situacaoCompraItemId: 4, // 4 - Deserto
+        dataSituacaoItem: dataSituacaoPadrao,
+        tipoValor: tipoValorPadrao,
+        tipoProposta: tipoPropostaPadrao,
+        licitantes: [],
+      }));
+
+    const combinados = [...itens, ...novosItens].sort((a, b) => a.numeroItem - b.numeroItem);
+    setItens(combinados);
+    toast.success(`${novosItens.length} item(ns) incluído(s) como deserto(s).`);
+  };
+
   const handleEnviarAudesp = async () => {
     if (!codigoEdital.trim()) {
       toast.error('Informe o Código do Edital vinculado.');
+      return;
+    }
+    if (editalNaoEnviado) {
+      toast.error('O edital ainda não foi enviado ao AUDESP. Transmita o edital antes de enviar a licitação.');
       return;
     }
     if (itens.length === 0) {
@@ -424,10 +519,19 @@ export const LicitacaoForm: React.FC = () => {
       }
 
       const res = await licitacaoService.enviarLicitacao(currentId);
-      toast.success(res.mensagem || `Licitação transmitida! Protocolo: ${res.protocolo}`);
       setLicitacaoStatus('sent');
       setProtocolo(res.protocolo);
-      setStatusProtocolo('Recebido');
+      setStatusProtocolo(res.status_protocolo || 'Recebido');
+      if (res.dados || res.detalhes) {
+        setDetalhesProtocolo(res.dados || res.detalhes);
+      }
+      if (res.historico_protocolo) {
+        setHistoricoProtocolo(res.historico_protocolo);
+      }
+      notificarResultadoProtocolo(res, {
+        prefixoSucesso: res.mensagem || 'Licitação transmitida com sucesso!',
+        isTransmissao: true,
+      });
       navigate(`/licitacoes/${currentId}`, { replace: true });
     } catch (err: any) {
       const detail = err.response?.data?.detail;
@@ -457,8 +561,11 @@ export const LicitacaoForm: React.FC = () => {
       setSending(true);
       const res = await licitacaoService.consultarProtocolo(Number(id));
       setStatusProtocolo(res.status);
-      setDetalhesProtocolo(res.dados);
-      toast.success(`Situação atualizada: ${res.status}`);
+      setDetalhesProtocolo(res.dados || res.detalhes);
+      if (res.historico) {
+        setHistoricoProtocolo(res.historico);
+      }
+      notificarResultadoProtocolo(res, { isTransmissao: false });
     } catch {
       toast.error('Erro ao consultar situação do protocolo');
     } finally {
@@ -468,7 +575,12 @@ export const LicitacaoForm: React.FC = () => {
 
   const handleRetornarRascunho = async () => {
     if (!id) return;
-    if (!window.confirm('Deseja retornar esta licitação para rascunho para reedição?')) return;
+    const totalDep = (dependentes.atas || 0) + (dependentes.ajustes || 0);
+    const msgConfirm =
+      totalDep > 0
+        ? `Atenção: esta licitação possui ${dependentes.atas} ata(s) e ${dependentes.ajustes} ajuste(s) vinculados. Deseja realmente retornar esta licitação para rascunho?`
+        : 'Deseja retornar esta licitação para rascunho para reedição?';
+    if (!window.confirm(msgConfirm)) return;
     try {
       await licitacaoService.retornarRascunho(Number(id));
       setLicitacaoStatus('draft');
@@ -542,9 +654,10 @@ export const LicitacaoForm: React.FC = () => {
   };
 
   const handleSaveLicitante = () => {
-    const ni = stripMask(licitanteForm.niPessoa);
+    const isPe = licitanteForm.tipoPessoaId === 'PE';
+    const ni = isPe ? licitanteForm.niPessoa.trim() : stripMask(licitanteForm.niPessoa);
     if (!ni) {
-      toast.error('Informe o CNPJ/CPF do licitante.');
+      toast.error('Informe o documento de identificação do licitante.');
       return;
     }
     if (licitanteForm.tipoPessoaId === 'PJ' && ni.length !== 14) {
@@ -555,7 +668,11 @@ export const LicitacaoForm: React.FC = () => {
       toast.error('CPF deve ter 11 dígitos.');
       return;
     }
-    if (licitanteForm.tipoPessoaId === 'PE' && !licitanteForm.nomeRazaoSocial?.trim()) {
+    if (isPe && ni.length < 3) {
+      toast.error('Para empresa estrangeira (PE), o documento/ID deve ter ao menos 3 caracteres.');
+      return;
+    }
+    if (isPe && !licitanteForm.nomeRazaoSocial?.trim()) {
       toast.error('Para empresa estrangeira (PE), informe a Razão Social.');
       return;
     }
@@ -567,11 +684,15 @@ export const LicitacaoForm: React.FC = () => {
     if (!currentItem) return;
     const updatedItens = [...itens];
     const licitantesItem = [...(currentItem.licitantes || [])];
+    const licitanteNormalizado: Licitante = {
+      ...licitanteForm,
+      niPessoa: ni,
+    };
 
     if (editingLicitanteIdx !== null) {
-      licitantesItem[editingLicitanteIdx] = { ...licitanteForm };
+      licitantesItem[editingLicitanteIdx] = licitanteNormalizado;
     } else {
-      licitantesItem.push({ ...licitanteForm });
+      licitantesItem.push(licitanteNormalizado);
     }
 
     updatedItens[selectedItemIdx] = {
@@ -623,30 +744,53 @@ export const LicitacaoForm: React.FC = () => {
 
       {/* Protocol Banner if Sent */}
       {isSent && (
-        <div className={`alert ${statusProtocolo?.toLowerCase().includes('rejeitado') ? 'alert-danger' : 'alert-success'} d-flex justify-content-between align-items-center shadow-sm mb-4`}>
-          <div>
-            <h5 className="alert-heading mb-1 d-flex align-items-center gap-2">
-              <CheckCircle2 size={20} /> Protocolo AUDESP: <strong>{protocolo}</strong>
-            </h5>
-            <p className="mb-0 small">
-              Situação no Tribunal de Contas: <strong>{statusProtocolo || 'Recebido'}</strong>
-            </p>
-            {detalhesProtocolo?.erros?.length > 0 && (
-              <div className="mt-2 pt-2 border-top border-danger-subtle small">
-                <strong>Erros / Notificações do TCESP:</strong>
-                <ul className="mb-0 ps-3 mt-1">
-                  {detalhesProtocolo.erros.map((err: any, idx: number) => (
-                    <li key={idx}>{err.mensagem || err.campo || JSON.stringify(err)}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
+        <div className={`alert ${statusProtocolo?.toLowerCase().includes('rejeitado') ? 'alert-danger' : 'alert-success'} shadow-sm mb-4`}>
+          <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+              <h5 className="alert-heading mb-1 d-flex align-items-center gap-2">
+                <CheckCircle2 size={20} /> Protocolo AUDESP: <strong>{protocolo}</strong>
+              </h5>
+              <p className="mb-0 small">
+                Situação no Tribunal de Contas: <strong>{statusProtocolo || 'Recebido'}</strong>
+              </p>
+            </div>
+            <div className="d-flex align-items-center gap-2">
+              <button
+                type="button"
+                onClick={handleConsultarProtocolo}
+                disabled={sending}
+                className="btn btn-sm btn-light border d-flex align-items-center gap-1"
+              >
+                <RefreshCw size={14} className={sending ? 'spin' : ''} /> Consultar Protocolo
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowHistoricoModal(true)}
+                className="btn btn-sm btn-light border d-flex align-items-center gap-1"
+              >
+                <History size={14} /> Histórico ({historicoProtocolo.length})
+              </button>
+              <span className="badge bg-white text-dark fs-6 px-3 py-2 border">
+                Fase IV — TCESP
+              </span>
+            </div>
           </div>
-          <span className="badge bg-white text-dark fs-6 px-3 py-2 border">
-            Fase IV — TCESP
-          </span>
+
+          <ProtocoloErrosAlert
+            detalhesProtocolo={detalhesProtocolo}
+            statusProtocolo={statusProtocolo}
+            className="mt-3"
+          />
         </div>
       )}
+
+      <HistoricoProtocoloModal
+        show={showHistoricoModal}
+        onHide={() => setShowHistoricoModal(false)}
+        protocolo={protocolo}
+        codigoDocumento={codigoEdital}
+        historico={historicoProtocolo}
+      />
 
       {/* Seção 1: Descritor e Vínculo com Edital */}
       <Card title="1. Descritor e Vínculo com o Edital" className="mb-4">
@@ -670,6 +814,14 @@ export const LicitacaoForm: React.FC = () => {
                   </option>
                 ))}
               </Form.Select>
+              {editalNaoEnviado && (
+                <div className="alert alert-warning py-2 px-3 mt-2 mb-0 small d-flex align-items-center gap-2">
+                  <AlertTriangle size={16} />
+                  <span>
+                    <strong>Atenção:</strong> O edital selecionado ainda está em rascunho. Você pode salvar o rascunho da licitação, mas o envio ao AUDESP exige que o edital tenha sido enviado primeiro.
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
@@ -752,11 +904,67 @@ export const LicitacaoForm: React.FC = () => {
               </div>
 
               <div className="col-md-4">
+                <Form.Label className="form-label fw-bold small text-secondary">Objeção Edital Pré-Qualificação</Form.Label>
+                <Form.Select
+                  className="form-select form-select-sm"
+                  value={editalPreQualificacaoBID}
+                  onChange={(e) => setEditalPreQualificacaoBID(Number(e.target.value))}
+                  disabled={isSent}
+                >
+                  <option value={1}>1 – Sim</option>
+                  <option value={2}>2 – Não</option>
+                  <option value={3}>3 – Não se aplica</option>
+                </Form.Select>
+              </div>
+
+              <div className="col-md-4">
+                <Form.Label className="form-label fw-bold small text-secondary">Objeção Julgamento Pré-Qualificação</Form.Label>
+                <Form.Select
+                  className="form-select form-select-sm"
+                  value={julgamentoPreQualificacaoBID}
+                  onChange={(e) => setJulgamentoPreQualificacaoBID(Number(e.target.value))}
+                  disabled={isSent}
+                >
+                  <option value={1}>1 – Sim</option>
+                  <option value={2}>2 – Não</option>
+                  <option value={3}>3 – Não se aplica</option>
+                </Form.Select>
+              </div>
+
+              <div className="col-md-4">
+                <Form.Label className="form-label fw-bold small text-secondary">Objeção Edital 2ª Fase</Form.Label>
+                <Form.Select
+                  className="form-select form-select-sm"
+                  value={edital2FaseBID}
+                  onChange={(e) => setEdital2FaseBID(Number(e.target.value))}
+                  disabled={isSent}
+                >
+                  <option value={1}>1 – Sim</option>
+                  <option value={2}>2 – Não</option>
+                  <option value={3}>3 – Não se aplica</option>
+                </Form.Select>
+              </div>
+
+              <div className="col-md-4">
                 <Form.Label className="form-label fw-bold small text-secondary">Objeção Julgamento Propostas</Form.Label>
                 <Form.Select
                   className="form-select form-select-sm"
                   value={julgamentoPropostasBID}
                   onChange={(e) => setJulgamentoPropostasBID(Number(e.target.value))}
+                  disabled={isSent}
+                >
+                  <option value={1}>1 – Sim</option>
+                  <option value={2}>2 – Não</option>
+                  <option value={3}>3 – Não se aplica</option>
+                </Form.Select>
+              </div>
+
+              <div className="col-md-4">
+                <Form.Label className="form-label fw-bold small text-secondary">Objeção Julgamento Negociação Final</Form.Label>
+                <Form.Select
+                  className="form-select form-select-sm"
+                  value={julgamentoNegociacaoBID}
+                  onChange={(e) => setJulgamentoNegociacaoBID(Number(e.target.value))}
                   disabled={isSent}
                 >
                   <option value={1}>1 – Sim</option>
@@ -858,6 +1066,176 @@ export const LicitacaoForm: React.FC = () => {
             </Form.Select>
           </div>
 
+          <div className="col-md-4">
+            <Form.Label className="form-label fw-bold small text-secondary">Parecer de Viabilidade da Contratação</Form.Label>
+            <Form.Select
+              className="form-select form-select-sm"
+              value={viabilidadeContratacao}
+              onChange={(e) => setViabilidadeContratacao(Number(e.target.value))}
+              disabled={isSent}
+            >
+              <option value={1}>1 – Sim</option>
+              <option value={2}>2 – Não</option>
+              <option value={3}>3 – Não se aplica</option>
+            </Form.Select>
+          </div>
+
+          <div className="col-md-4">
+            <Form.Label className="form-label fw-bold small text-secondary">Exigência de Visita Técnica</Form.Label>
+            <Form.Select
+              className="form-select form-select-sm"
+              value={exigenciaVisitaTecnica}
+              onChange={(e) => setExigenciaVisitaTecnica(Number(e.target.value))}
+              disabled={isSent}
+            >
+              {dominios && Object.entries(dominios.exigenciasVisita).map(([val, label]) => (
+                <option key={val} value={val}>{label}</option>
+              ))}
+            </Form.Select>
+          </div>
+
+          {exigenciaVisitaTecnica === 1 && (
+            <div className="col-md-4 d-flex align-items-center gap-4 pt-3">
+              <div className="form-check">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="chkCurriculo"
+                  checked={exigenciaCurriculo}
+                  onChange={(e) => setExigenciaCurriculo(e.target.checked)}
+                  disabled={isSent}
+                />
+                <Form.Label className="form-check-label small fw-medium" htmlFor="chkCurriculo">
+                  Exige Currículo Profissional
+                </Form.Label>
+              </div>
+
+              <div className="form-check">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="chkVistoCrea"
+                  checked={exigenciaVistoCREA}
+                  onChange={(e) => setExigenciaVistoCREA(e.target.checked)}
+                  disabled={isSent}
+                />
+                <Form.Label className="form-check-label small fw-medium" htmlFor="chkVistoCrea">
+                  Exige Visto CREA/SP
+                </Form.Label>
+              </div>
+            </div>
+          )}
+
+          {/* Exigência de Índices Econômicos */}
+          <div className="col-12 border-top pt-2 mt-2">
+            <div className="row g-3 align-items-end">
+              <div className="col-md-4">
+                <Form.Label className="form-label fw-bold small text-secondary">Exigência de Índices Econômicos Mínimos</Form.Label>
+                <Form.Select
+                  className="form-select form-select-sm"
+                  value={exigenciaIndicesEconomicos}
+                  onChange={(e) => setExigenciaIndicesEconomicos(Number(e.target.value))}
+                  disabled={isSent}
+                >
+                  <option value={1}>1 – Sim</option>
+                  <option value={2}>2 – Não</option>
+                  <option value={3}>3 – Não se aplica</option>
+                </Form.Select>
+              </div>
+
+              {exigenciaIndicesEconomicos === 1 && !isSent && (
+                <div className="col-md-4">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setIndicesEconomicos([
+                        ...indicesEconomicos,
+                        { tipoIndice: 1, valorIndice: 1, nomeIndice: '' }
+                      ])
+                    }
+                    className="btn btn-outline-success btn-sm d-flex align-items-center gap-1"
+                  >
+                    <Plus size={14} /> Adicionar Índice Econômico
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {exigenciaIndicesEconomicos === 1 && indicesEconomicos.length > 0 && (
+              <div className="mt-2 d-flex flex-column gap-2">
+                {indicesEconomicos.map((ind, idx) => (
+                  <div key={idx} className="row g-2 align-items-center bg-light p-2 rounded border">
+                    <div className="col-md-4">
+                      <Form.Select
+                        size="sm"
+                        value={ind.tipoIndice}
+                        onChange={(e) => {
+                          const updated = [...indicesEconomicos];
+                          updated[idx] = { ...updated[idx], tipoIndice: Number(e.target.value) };
+                          setIndicesEconomicos(updated);
+                        }}
+                        disabled={isSent}
+                      >
+                        {dominios &&
+                          Object.entries(dominios.indicesEconomicos).map(([val, label]) => (
+                            <option key={val} value={val}>{label}</option>
+                          ))}
+                      </Form.Select>
+                    </div>
+
+                    {ind.tipoIndice === 8 && (
+                      <div className="col-md-4">
+                        <Form.Control
+                          size="sm"
+                          type="text"
+                          placeholder="Nome do Índice (3 a 50 caracteres)"
+                          maxLength={50}
+                          value={ind.nomeIndice || ''}
+                          onChange={(e) => {
+                            const updated = [...indicesEconomicos];
+                            updated[idx] = { ...updated[idx], nomeIndice: e.target.value };
+                            setIndicesEconomicos(updated);
+                          }}
+                          disabled={isSent}
+                        />
+                      </div>
+                    )}
+
+                    <div className="col-md-3">
+                      <Form.Control
+                        size="sm"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="Valor do índice"
+                        value={ind.valorIndice}
+                        onChange={(e) => {
+                          const updated = [...indicesEconomicos];
+                          updated[idx] = { ...updated[idx], valorIndice: parseFloat(e.target.value) || 0 };
+                          setIndicesEconomicos(updated);
+                        }}
+                        disabled={isSent}
+                      />
+                    </div>
+
+                    {!isSent && (
+                      <div className="col-md-1 text-end">
+                        <button
+                          type="button"
+                          onClick={() => setIndicesEconomicos(indicesEconomicos.filter((_, i) => i !== idx))}
+                          className="btn btn-outline-danger btn-sm"
+                          title="Remover índice"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Quitação de Tributos */}
           <div className="col-12 border-top pt-2 mt-2">
             <span className="fw-bold small text-secondary d-block mb-1">
@@ -918,42 +1296,43 @@ export const LicitacaoForm: React.FC = () => {
               </Form.Label>
             </div>
 
-            {declaracaoRecursosContratacao && (
-              <div className="p-3 bg-light rounded border">
-                <span className="small fw-bold text-secondary d-block mb-2">
-                  Selecione as Fontes de Recursos Envolvidas:
-                </span>
-                <div className="row g-2">
-                  {dominios && Object.entries(dominios.fontesRecurso).map(([cStr, desc]) => {
-                    const cNum = Number(cStr);
-                    const isChecked = fontesRecurso.includes(cNum);
-                    return (
-                      <div key={cStr} className="col-md-6">
-                        <div className="form-check">
-                          <input
-                            className="form-check-input"
-                            type="checkbox"
-                            id={`fr_${cStr}`}
-                            checked={isChecked}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setFontesRecurso([...fontesRecurso, cNum]);
-                              } else {
-                                setFontesRecurso(fontesRecurso.filter(f => f !== cNum));
-                              }
-                            }}
-                            disabled={isSent}
-                          />
-                          <Form.Label className="form-check-label small" htmlFor={`fr_${cStr}`}>
-                            {desc}
-                          </Form.Label>
-                        </div>
+            <div className="p-3 bg-light rounded border">
+              <span className="small fw-bold text-secondary d-block mb-1">
+                Selecione as Fontes de Recursos Envolvidas:
+              </span>
+              <span className="text-muted d-block mb-2" style={{ fontSize: '0.75rem' }}>
+                Obrigatório informar ao menos uma fonte quando há declaração de recursos. Em registro de preços (SRP), informe as fontes mesmo sem marcar a declaração.
+              </span>
+              <div className="row g-2">
+                {dominios && Object.entries(dominios.fontesRecurso).map(([cStr, desc]) => {
+                  const cNum = Number(cStr);
+                  const isChecked = fontesRecurso.includes(cNum);
+                  return (
+                    <div key={cStr} className="col-md-6">
+                      <div className="form-check">
+                        <input
+                          className="form-check-input"
+                          type="checkbox"
+                          id={`fr_${cStr}`}
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setFontesRecurso([...fontesRecurso, cNum]);
+                            } else {
+                              setFontesRecurso(fontesRecurso.filter(f => f !== cNum));
+                            }
+                          }}
+                          disabled={isSent}
+                        />
+                        <Form.Label className="form-check-label small" htmlFor={`fr_${cStr}`}>
+                          {desc}
+                        </Form.Label>
                       </div>
-                    );
-                  })}
-                </div>
+                    </div>
+                  );
+                })}
               </div>
-            )}
+            </div>
           </div>
 
           {/* Condutores da Contratação (CPFs) */}
@@ -1033,6 +1412,23 @@ export const LicitacaoForm: React.FC = () => {
           )
         }
       >
+        {!isSent && numerosItensFaltantes.length > 0 && (
+          <div className="alert alert-warning d-flex flex-wrap justify-content-between align-items-center gap-2 py-2 px-3 mb-3 small">
+            <div className="d-flex align-items-center gap-2">
+              <AlertTriangle size={16} />
+              <span>
+                O edital vinculado possui <strong>{numerosItensFaltantes.length} item(ns)</strong> ainda não informado(s) nesta licitação (itens: {numerosItensFaltantes.join(', ')}).
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleCadastrarFaltantesComoDesertos}
+              className="btn btn-sm btn-outline-dark py-0 px-2"
+            >
+              Cadastrar {numerosItensFaltantes.length} faltante(s) como deserto(s)
+            </button>
+          </div>
+        )}
         {itens.length === 0 ? (
           <div className="alert alert-warning py-3 text-center mb-0 small">
             <AlertTriangle size={20} className="mb-1 text-warning" />
@@ -1328,6 +1724,19 @@ export const LicitacaoForm: React.FC = () => {
                   </div>
 
                   <div className="col-md-6">
+                    <Form.Label className="form-label small fw-bold text-secondary">Tipo de Proposta *</Form.Label>
+                    <Form.Select
+                      className="form-select form-select-sm"
+                      value={itemForm.tipoProposta}
+                      onChange={(e) => setItemForm({ ...itemForm, tipoProposta: Number(e.target.value) })}
+                    >
+                      {dominios && Object.entries(dominios.tiposProposta).map(([val, label]) => (
+                        <option key={val} value={val}>{label}</option>
+                      ))}
+                    </Form.Select>
+                  </div>
+
+                  <div className="col-md-6">
                     <Form.Label className="form-label small fw-bold text-secondary">Tipo de Orçamento Realizado *</Form.Label>
                     <Form.Select
                       className="form-select form-select-sm"
@@ -1341,16 +1750,28 @@ export const LicitacaoForm: React.FC = () => {
                   </div>
 
                   {itemForm.tipoOrcamento !== 0 && (
-                    <div className="col-md-6">
-                      <Form.Label className="form-label small fw-bold text-secondary">Valor Orçado Estimado *</Form.Label>
-                      <Form.Control
-                        type="number"
-                        step="0.0001"
-                        className="form-control form-control-sm"
-                        value={itemForm.valor || 0}
-                        onChange={(e) => setItemForm({ ...itemForm, valor: parseFloat(e.target.value) || 0 })}
-                      />
-                    </div>
+                    <>
+                      <div className="col-md-6">
+                        <Form.Label className="form-label small fw-bold text-secondary">Valor Orçado Estimado *</Form.Label>
+                        <Form.Control
+                          type="number"
+                          step="0.0001"
+                          className="form-control form-control-sm"
+                          value={itemForm.valor || 0}
+                          onChange={(e) => setItemForm({ ...itemForm, valor: parseFloat(e.target.value) || 0 })}
+                        />
+                      </div>
+
+                      <div className="col-md-6">
+                        <Form.Label className="form-label small fw-bold text-secondary">Data do Orçamento *</Form.Label>
+                        <Form.Control
+                          type="date"
+                          className="form-control form-control-sm"
+                          value={itemForm.dataOrcamento || ''}
+                          onChange={(e) => setItemForm({ ...itemForm, dataOrcamento: e.target.value })}
+                        />
+                      </div>
+                    </>
                   )}
                 </div>
               </div>

@@ -6,9 +6,21 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, UploadFile
 from sqlmodel import Session, select, or_
 
-from core.audesp_client import enviar_edital_audesp, consultar_protocolo_audesp
+from core.audesp_client import (
+    enviar_edital_audesp,
+    consultar_protocolo_audesp,
+    extrair_erros_estruturados_audesp,
+    extrair_mensagens_protocolo_audesp,
+)
+from modules.protocolos.ProtocoloService import (
+    consultar_e_registrar_protocolo,
+    listar_historico_protocolo,
+)
 from core.audesp_domains import MUNICIPIOS_AUDESP, ENTIDADES_AUDESP
 from modules.editais.Edital import Edital, EditalArquivo
+from modules.licitacoes.Licitacao import Licitacao
+from modules.atas.Ata import AtaRegistroPreco
+from modules.ajustes.Ajuste import AjusteContrato
 from modules.editais.EditalDomains import (
     DOMINIO_INSTRUMENTOS,
     DOMINIO_MODALIDADES,
@@ -18,6 +30,8 @@ from modules.editais.EditalDomains import (
     DOMINIO_TIPO_BENEFICIO,
     DOMINIO_CRITERIO_JULGAMENTO,
     DOMINIO_ITEM_CATEGORIA,
+    DOMINIO_ITEM_CATEGORIA_LEILAO,
+    normalizar_categorias_edital,
     validar_regras_negocio_edital
 )
 
@@ -50,9 +64,57 @@ class EditalService:
             "tiposBeneficio": DOMINIO_TIPO_BENEFICIO,
             "criteriosJulgamento": DOMINIO_CRITERIO_JULGAMENTO,
             "categoriasItem": DOMINIO_ITEM_CATEGORIA,
+            "categoriasItemLeilao": DOMINIO_ITEM_CATEGORIA_LEILAO,
             "amparosLegais": AMPAROS_LEGAIS,
             "municipios": MUNICIPIOS_AUDESP,
             "entidades": ENTIDADES_AUDESP
+        }
+
+    @staticmethod
+    def obter_dependentes(session: Session, edital_id: int) -> Dict[str, Any]:
+        """Retorna a contagem de licitações, atas e ajustes dependentes de um edital."""
+        edital = session.get(Edital, edital_id)
+        if not edital:
+            return {"licitacoes": 0, "atas": 0, "ajustes": 0, "tem_licitacao_enviada": False}
+
+        licitacoes = session.exec(
+            select(Licitacao).where(
+                or_(
+                    Licitacao.edital_id == edital.id,
+                    (Licitacao.codigo_edital == edital.codigo_edital)
+                    & (Licitacao.municipio == edital.municipio)
+                    & (Licitacao.entidade == edital.entidade)
+                )
+            )
+        ).all()
+
+        atas = session.exec(
+            select(AtaRegistroPreco).where(
+                or_(
+                    AtaRegistroPreco.edital_id == edital.id,
+                    (AtaRegistroPreco.codigo_edital == edital.codigo_edital)
+                    & (AtaRegistroPreco.municipio == edital.municipio)
+                    & (AtaRegistroPreco.entidade == edital.entidade)
+                )
+            )
+        ).all()
+
+        ajustes = session.exec(
+            select(AjusteContrato).where(
+                or_(
+                    AjusteContrato.edital_id == edital.id,
+                    (AjusteContrato.codigo_edital == edital.codigo_edital)
+                    & (AjusteContrato.municipio == edital.municipio)
+                    & (AjusteContrato.entidade == edital.entidade)
+                )
+            )
+        ).all()
+
+        return {
+            "licitacoes": len(licitacoes),
+            "atas": len(atas),
+            "ajustes": len(ajustes),
+            "tem_licitacao_enviada": any(lic.status == "sent" for lic in licitacoes)
         }
 
     @staticmethod
@@ -101,7 +163,11 @@ class EditalService:
         return {
             **edital.model_dump(),
             "parsed_documento": doc_json,
-            "parsed_detalhes_protocolo": detalhes_prot
+            "parsed_detalhes_protocolo": detalhes_prot,
+            "erros_formatados": extrair_mensagens_protocolo_audesp(detalhes_prot),
+            "erros_detalhados": extrair_erros_estruturados_audesp(detalhes_prot),
+            "historico_protocolo": listar_historico_protocolo(session, "edital", edital.id, edital.protocolo),
+            "dependentes": EditalService.obter_dependentes(session, edital.id)
         }
 
     @staticmethod
@@ -115,7 +181,9 @@ class EditalService:
             except Exception:
                 raise HTTPException(status_code=400, detail="documento_json inválido")
         else:
-            doc_dict = documento
+            doc_dict = dict(documento)
+
+        doc_dict = normalizar_categorias_edital(doc_dict)
 
         descritor = doc_dict.get("descritor", {})
         codigo_edital = str(descritor.get("codigoEdital") or payload.get("codigo_edital") or "").strip()
@@ -163,7 +231,9 @@ class EditalService:
             except Exception:
                 raise HTTPException(status_code=400, detail="documento_json inválido")
         else:
-            doc_dict = documento
+            doc_dict = dict(documento)
+
+        doc_dict = normalizar_categorias_edital(doc_dict)
 
         descritor = doc_dict.get("descritor", {})
         if descritor.get("codigoEdital"):
@@ -305,6 +375,22 @@ class EditalService:
         if "criterioJulgamentoId" in doc:
             del doc["criterioJulgamentoId"]
 
+        doc = normalizar_categorias_edital(doc)
+
+        # Bloqueia envio se sem_pncp estiver ativo mas houver publicação PNCP (veículo 5)
+        if edital.sem_pncp:
+            publicacoes = (doc.get("publicidade") or {}).get("publicacoes") or []
+            if any(pub.get("veiculoPublicacao") == 5 for pub in publicacoes if isinstance(pub, dict)):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "mensagem": "O edital não atende às regras de negócio da Fase IV do AUDESP.",
+                        "erros": [
+                            'O edital está configurado como "Sem PNCP", mas há um veículo de publicação PNCP (veículo 5) selecionado nas publicações. Remova-o antes de enviar.'
+                        ]
+                    }
+                )
+
         arquivo = session.exec(
             select(EditalArquivo).where(EditalArquivo.edital_id == edital.id)
         ).first()
@@ -344,11 +430,45 @@ class EditalService:
             session.add(edital)
             session.commit()
             session.refresh(edital)
+
+            # Consulta automaticamente o protocolo logo após a transmissão
+            consulta_auto = None
+            if protocolo:
+                consulta_auto = consultar_e_registrar_protocolo(
+                    session=session,
+                    token=token,
+                    modulo="edital",
+                    registro_id=edital.id,
+                    codigo_documento=edital.codigo_edital,
+                    protocolo=protocolo,
+                    origem="envio_automatico",
+                    status_padrao="Recebido",
+                )
+                if consulta_auto.get("sucesso"):
+                    edital.status_protocolo = consulta_auto.get("status") or "Recebido"
+                    edital.detalhes_protocolo = json.dumps(consulta_auto.get("dados", {}), ensure_ascii=False)
+                    edital.updated_at = datetime.now(timezone.utc)
+                    session.add(edital)
+                    session.commit()
+                    session.refresh(edital)
+
+            erros_formatados = consulta_auto.get("erros_formatados", []) if consulta_auto else []
+            erros_detalhados = consulta_auto.get("erros_detalhados", []) if consulta_auto else []
+            is_rejeitado = bool(consulta_auto.get("is_rejeitado")) if consulta_auto else False
+            possui_erros = bool(consulta_auto.get("possui_erros")) if consulta_auto else False
+
             return {
                 "sucesso": True,
                 "mensagem": resultado["mensagem"],
                 "protocolo": protocolo,
-                "status_protocolo": "Recebido"
+                "status_protocolo": edital.status_protocolo or "Recebido",
+                "is_rejeitado": is_rejeitado,
+                "possui_erros": possui_erros,
+                "erros_formatados": erros_formatados,
+                "erros_detalhados": erros_detalhados,
+                "dados": consulta_auto.get("dados") if consulta_auto else resultado.get("dados"),
+                "detalhes": consulta_auto.get("dados") if consulta_auto else resultado.get("dados"),
+                "historico_protocolo": consulta_auto.get("historico", []) if consulta_auto else [],
             }
         else:
             edital.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
@@ -366,16 +486,25 @@ class EditalService:
 
     @staticmethod
     async def consultar_protocolo(session: Session, id: int, token: str) -> Dict[str, Any]:
-        """Consulta no AUDESP a situação de processamento do protocolo."""
+        """Consulta no AUDESP a situação de processamento do protocolo e grava no histórico."""
         edital = session.get(Edital, id)
         if not edital or not edital.protocolo:
             raise HTTPException(status_code=404, detail="Edital não possui protocolo para consulta.")
 
-        resultado = consultar_protocolo_audesp(token=token, protocolo=edital.protocolo)
-        if resultado["sucesso"]:
-            novo_status = resultado.get("status") or edital.status_protocolo
+        consulta = consultar_e_registrar_protocolo(
+            session=session,
+            token=token,
+            modulo="edital",
+            registro_id=edital.id,
+            codigo_documento=edital.codigo_edital,
+            protocolo=edital.protocolo,
+            origem="consulta_manual",
+            status_padrao=edital.status_protocolo or "Recebido",
+        )
+        if consulta["sucesso"]:
+            novo_status = consulta.get("status") or edital.status_protocolo
             edital.status_protocolo = novo_status
-            edital.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
+            edital.detalhes_protocolo = json.dumps(consulta.get("dados", {}), ensure_ascii=False)
             edital.updated_at = datetime.now(timezone.utc)
             session.add(edital)
             session.commit()
@@ -384,13 +513,27 @@ class EditalService:
                 "sucesso": True,
                 "protocolo": edital.protocolo,
                 "status": novo_status,
-                "dados": resultado.get("dados")
+                "is_rejeitado": consulta.get("is_rejeitado", False),
+                "possui_erros": consulta.get("possui_erros", False),
+                "erros_formatados": consulta.get("erros_formatados", []),
+                "erros_detalhados": consulta.get("erros_detalhados", []),
+                "dados": consulta.get("dados"),
+                "detalhes": consulta.get("dados"),
+                "historico": consulta.get("historico", []),
             }
         else:
             raise HTTPException(
-                status_code=resultado.get("status_code", 400),
-                detail=resultado.get("mensagem", "Erro ao consultar protocolo")
+                status_code=consulta.get("status_code", 400),
+                detail=consulta.get("mensagem", "Erro ao consultar protocolo")
             )
+
+    @staticmethod
+    def obter_historico_protocolo(session: Session, id: int) -> List[Dict[str, Any]]:
+        """Retorna o histórico de consultas de protocolo de um edital."""
+        edital = session.get(Edital, id)
+        if not edital:
+            raise HTTPException(status_code=404, detail="Edital não encontrado")
+        return listar_historico_protocolo(session, "edital", edital.id, edital.protocolo)
 
     @staticmethod
     def retornar_rascunho(session: Session, id: int) -> Dict[str, Any]:

@@ -21,17 +21,31 @@ import {
   AlertCircle,
   RefreshCw,
   RotateCcw,
-  CheckCircle2
+  CheckCircle2,
+  Download,
+  History
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import { PageHeader } from '../../components/PageHeader/PageHeader';
 import { CardBox } from '../../components/CardBox/CardBox';
-import { MunicipioEntidadeSelect } from '../../components/MunicipioEntidadeSelect/MunicipioEntidadeSelect';
+import {
+  ProtocoloErrosAlert,
+  HistoricoProtocoloModal,
+  notificarResultadoProtocolo,
+} from '../../components/ProtocoloInfo/ProtocoloComponents';
+import {
+  MunicipioEntidadeSelect,
+  getSavedMunicipio,
+  getSavedEntidade
+} from '../../components/MunicipioEntidadeSelect/MunicipioEntidadeSelect';
 import { ataService } from '../../services/ataService';
 import { editalService } from '../../services/editalService';
+import { licitacaoService } from '../../services/licitacaoService';
 import type { Edital } from '../../types/edital';
+import type { ReferenciaEditalResponse } from '../../types/licitacao';
 import type { MunicipioAudesp, EntidadeAudesp } from '../../types/audesp';
+import type { HistoricoProtocoloItem } from '../../utils/protocoloFormatter';
 
 export const AtaForm: React.FC = () => {
   const navigate = useNavigate();
@@ -51,11 +65,13 @@ export const AtaForm: React.FC = () => {
   const [protocolo, setProtocolo] = useState<string | null>(null);
   const [statusProtocolo, setStatusProtocolo] = useState<string | null>(null);
   const [detalhesProtocolo, setDetalhesProtocolo] = useState<any>(null);
+  const [historicoProtocolo, setHistoricoProtocolo] = useState<HistoricoProtocoloItem[]>([]);
+  const [showHistoricoModal, setShowHistoricoModal] = useState<boolean>(false);
 
   // Form State
   const [editalId, setEditalId] = useState<number | ''>('');
-  const [municipio, setMunicipio] = useState<number>(7071);
-  const [entidade, setEntidade] = useState<number>(11310);
+  const [municipio, setMunicipio] = useState<number>(() => getSavedMunicipio(7071));
+  const [entidade, setEntidade] = useState<number>(() => getSavedEntidade(11310));
   const [codigoEdital, setCodigoEdital] = useState('');
   const [codigoAta, setCodigoAta] = useState('');
   const [anoCompra, setAnoCompra] = useState<number>(new Date().getFullYear());
@@ -69,6 +85,17 @@ export const AtaForm: React.FC = () => {
 
   // Itens selecionados da licitação/edital
   const [selectedItens, setSelectedItens] = useState<number[]>([]);
+  const [referenciaEdital, setReferenciaEdital] = useState<ReferenciaEditalResponse | null>(null);
+  const [showImportarModal, setShowImportarModal] = useState<boolean>(false);
+
+  const carregarReferenciaEdital = async (eId: number) => {
+    try {
+      const ref = await licitacaoService.getReferenciaEdital(eId);
+      setReferenciaEdital(ref);
+    } catch {
+      setReferenciaEdital(null);
+    }
+  };
 
   // Carrega lista de editais para vinculação
   useEffect(() => {
@@ -94,7 +121,11 @@ export const AtaForm: React.FC = () => {
       const loadAta = async () => {
         try {
           setLoading(true);
-          const { ata, documento } = await ataService.getAtaById(Number(id));
+          const resp = await ataService.getAtaById(Number(id));
+          const { ata, documento } = resp;
+          if ((resp as any).historico_protocolo) {
+            setHistoricoProtocolo((resp as any).historico_protocolo);
+          }
           
           setEditalId(ata.edital_id || '');
           setMunicipio(ata.municipio);
@@ -125,6 +156,7 @@ export const AtaForm: React.FC = () => {
           if (ata.edital_id) {
             const ed = await editalService.getEdital(ata.edital_id);
             setSelectedEdital(ed);
+            await carregarReferenciaEdital(ata.edital_id);
           }
         } catch {
           toast.error('Erro ao carregar dados da Ata.');
@@ -142,6 +174,7 @@ export const AtaForm: React.FC = () => {
     setEditalId(eId);
     if (!eId) {
       setSelectedEdital(null);
+      setReferenciaEdital(null);
       return;
     }
     try {
@@ -153,14 +186,32 @@ export const AtaForm: React.FC = () => {
       setCodigoEdital(ed.codigo_edital);
       setAnoCompra(ed.ano_compra || new Date().getFullYear());
 
-      // Pré-seleciona todos os itens do edital
-      const itens = (ed as any).parsed_documento?.itensCompra || (ed as any).documento?.itensCompra;
-      if (itens && Array.isArray(itens)) {
-        setSelectedItens(itens.map((it: any) => it.numeroItem));
+      const ref = await licitacaoService.getReferenciaEdital(eId).catch(() => null);
+      setReferenciaEdital(ref);
+
+      // Se houver itens homologados na licitação enviada, pré-seleciona apenas os homologados; caso contrário, os do edital
+      if (ref && ref.situacao_licitacao === 'enviada' && ref.itens_homologados.length > 0) {
+        setSelectedItens(ref.itens_homologados);
+      } else {
+        const itens = (ed as any).parsed_documento?.itensCompra || (ed as any).documento?.itensCompra;
+        if (itens && Array.isArray(itens)) {
+          setSelectedItens(itens.map((it: any) => it.numeroItem));
+        }
       }
     } catch {
       toast.error('Erro ao carregar itens do edital selecionado.');
     }
+  };
+
+  const handleImportarItensHomologados = (itensParaImportar: number[]) => {
+    if (!itensParaImportar.length) {
+      toast.error('Nenhum item homologado encontrado para importar.');
+      return;
+    }
+    const merged = Array.from(new Set([...selectedItens, ...itensParaImportar])).sort((a, b) => a - b);
+    setSelectedItens(merged);
+    setShowImportarModal(false);
+    toast.success(`${itensParaImportar.length} item(ns) homologado(s) importado(s) para a ata!`);
   };
 
   const toggleItem = (numItem: number) => {
@@ -246,13 +297,38 @@ export const AtaForm: React.FC = () => {
       toast.success(isEditing ? 'Ata atualizada com sucesso!' : 'Ata criada com sucesso!');
 
       if (transmitirAposSalvar) {
+        if (selectedEdital) {
+          const edDoc = selectedEdital.parsed_documento || selectedEdital.documento;
+          if (selectedEdital.status !== 'sent') {
+            toast.error('O edital vinculado ainda não foi enviado ao AUDESP.');
+            if (!isEditing) navigate(`/atas/${resAta.id}`);
+            return;
+          }
+          if (!edDoc?.srp) {
+            toast.error('Ata de registro de preços exige edital SRP.');
+            if (!isEditing) navigate(`/atas/${resAta.id}`);
+            return;
+          }
+          if (referenciaEdital && referenciaEdital.situacao_licitacao !== 'enviada') {
+            toast.error(
+              referenciaEdital.situacao_licitacao === 'inexistente'
+                ? 'O edital ainda não tem licitação.'
+                : 'A licitação do edital ainda não foi enviada ao AUDESP.'
+            );
+            if (!isEditing) navigate(`/atas/${resAta.id}`);
+            return;
+          }
+        }
         setSending(true);
         toast.loading('Transmitindo para o AUDESP...', { id: 'transmissao' });
         const resEnvio = await ataService.enviarAta(resAta.id);
         toast.dismiss('transmissao');
         setSending(false);
         if (resEnvio.sucesso) {
-          toast.success(`Ata transmitida! Protocolo: ${resEnvio.protocolo}`);
+          notificarResultadoProtocolo(resEnvio, {
+            prefixoSucesso: 'Ata transmitida com sucesso!',
+            isTransmissao: true,
+          });
           navigate('/atas');
         } else {
           toast.error(resEnvio.mensagem || 'Falha na transmissão da ata.');
@@ -264,8 +340,12 @@ export const AtaForm: React.FC = () => {
         }
       }
     } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Erro ao salvar ata.';
-      toast.error(msg);
+      const detail = err.response?.data?.detail;
+      if (detail && typeof detail === 'object' && detail.erros?.length) {
+        toast.error(detail.erros.join(' | '));
+      } else {
+        toast.error(detail?.mensagem || detail || 'Erro ao salvar/enviar ata.');
+      }
     } finally {
       setSaving(false);
       setSending(false);
@@ -279,8 +359,11 @@ export const AtaForm: React.FC = () => {
       const res = await ataService.consultarProtocolo(Number(id));
       if (res.sucesso) {
         setStatusProtocolo(res.status);
-        setDetalhesProtocolo(res.detalhes);
-        toast.success(`Status atualizado: ${res.status}`);
+        setDetalhesProtocolo(res.detalhes || res.dados);
+        if (res.historico) {
+          setHistoricoProtocolo(res.historico);
+        }
+        notificarResultadoProtocolo(res, { isTransmissao: false });
       } else {
         toast.error(res.mensagem || 'Erro ao consultar protocolo.');
       }
@@ -319,6 +402,34 @@ export const AtaForm: React.FC = () => {
 
   const isSent = ataStatus === 'sent';
   const itensCompra = selectedEdital?.parsed_documento?.itensCompra || selectedEdital?.documento?.itensCompra;
+  const isEditalSrp = (ed: any) => {
+    if (!ed) return false;
+    if (ed.parsed_documento) return Boolean(ed.parsed_documento.srp);
+    if (ed.documento_json) {
+      try {
+        const parsed = typeof ed.documento_json === 'string' ? JSON.parse(ed.documento_json) : ed.documento_json;
+        return Boolean(parsed?.srp);
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  };
+  const editaisParaAta = editais.filter(
+    (ed) => (ed.status === 'sent' && isEditalSrp(ed)) || ed.id === Number(editalId)
+  );
+  const selectedEditalSrp = selectedEdital ? isEditalSrp(selectedEdital) : true;
+  const avisoBloqueioEnvio = selectedEdital
+    ? selectedEdital.status !== 'sent'
+      ? 'O edital selecionado ainda está em rascunho. Você pode salvar o rascunho da ata, mas o envio ao AUDESP exige que o edital seja enviado primeiro.'
+      : !selectedEditalSrp
+      ? 'Ata de registro de preços exige edital com Sistema de Registro de Preços (SRP) marcado.'
+      : referenciaEdital?.situacao_licitacao === 'inexistente'
+      ? 'O edital selecionado ainda não possui licitação cadastrada. O envio da ata ao AUDESP exige uma licitação enviada.'
+      : referenciaEdital?.situacao_licitacao === 'rascunho'
+      ? 'A licitação do edital ainda está em rascunho. Envie a licitação ao AUDESP antes de transmitir a ata.'
+      : null
+    : null;
 
   return (
     <Container fluid className="p-0 pb-5">
@@ -336,48 +447,80 @@ export const AtaForm: React.FC = () => {
 
       {/* Protocol Banner if Sent */}
       {isSent && (
-        <div className={`alert ${statusProtocolo?.toLowerCase().includes('rejeitado') ? 'alert-danger' : 'alert-success'} d-flex justify-content-between align-items-center shadow-sm mb-4`}>
-          <div>
-            <h5 className="alert-heading mb-1 d-flex align-items-center gap-2">
-              <CheckCircle2 size={20} /> Protocolo AUDESP: <strong>{protocolo}</strong>
-            </h5>
-            <p className="mb-0 small">
-              Situação no Tribunal de Contas: <strong>{statusProtocolo || 'Recebido'}</strong>
-            </p>
-            {detalhesProtocolo?.erros?.length > 0 && (
-              <div className="mt-2 pt-2 border-top border-danger-subtle small">
-                <strong>Erros / Notificações do TCESP:</strong>
-                <ul className="mb-0 ps-3 mt-1">
-                  {detalhesProtocolo.erros.map((err: any, idx: number) => (
-                    <li key={idx}>{err.mensagem || err.campo || JSON.stringify(err)}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
+        <div className={`alert ${statusProtocolo?.toLowerCase().includes('rejeitado') ? 'alert-danger' : 'alert-success'} shadow-sm mb-4`}>
+          <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+              <h5 className="alert-heading mb-1 d-flex align-items-center gap-2">
+                <CheckCircle2 size={20} /> Protocolo AUDESP: <strong>{protocolo}</strong>
+              </h5>
+              <p className="mb-0 small">
+                Situação no Tribunal de Contas: <strong>{statusProtocolo || 'Recebido'}</strong>
+              </p>
+            </div>
+            <div className="d-flex align-items-center gap-2">
+              <button
+                type="button"
+                onClick={handleConsultarProtocolo}
+                disabled={sending}
+                className="btn btn-sm btn-light border d-flex align-items-center gap-1"
+              >
+                <RefreshCw size={14} className={sending ? 'spin' : ''} /> Consultar Protocolo
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowHistoricoModal(true)}
+                className="btn btn-sm btn-light border d-flex align-items-center gap-1"
+              >
+                <History size={14} /> Histórico ({historicoProtocolo.length})
+              </button>
+              <span className="badge bg-white text-dark fs-6 px-3 py-2 border">
+                Fase IV — TCESP
+              </span>
+            </div>
           </div>
-          <span className="badge bg-white text-dark fs-6 px-3 py-2 border">
-            Fase IV — TCESP
-          </span>
+
+          <ProtocoloErrosAlert
+            detalhesProtocolo={detalhesProtocolo}
+            statusProtocolo={statusProtocolo}
+            className="mt-3"
+          />
         </div>
       )}
 
+      <HistoricoProtocoloModal
+        show={showHistoricoModal}
+        onHide={() => setShowHistoricoModal(false)}
+        protocolo={protocolo}
+        codigoDocumento={codigoAta || `${numeroAtaRegistroPreco}/${anoAta}`}
+        historico={historicoProtocolo}
+      />
+
       <Row className="g-4">
-        {/* Coluna 1: Dados do Descritor e Vinculação com Form Controls de React-Bootstrap */}
-        <Col lg={6}>
+        {/* Seções em 100% de largura empilhadas verticalmente */}
+        <Col xs={12}>
           <CardBox title="1. Edital e Identificadores do TCESP">
             <Form.Group className="mb-3">
-              <Form.Label className="fw-bold">Vincular a um Edital Cadastrado (Opcional):</Form.Label>
+              <Form.Label className="fw-bold">Vincular a um Edital SRP Enviado:</Form.Label>
               <Form.Select
                 value={editalId}
                 onChange={(e) => handleSelectEdital(Number(e.target.value))}
+                disabled={isSent}
               >
-                <option value="">-- Selecione um edital para autopreenchimento --</option>
-                {editais.map((ed) => (
+                <option value="">-- Selecione um edital SRP para autopreenchimento --</option>
+                {editaisParaAta.map((ed) => (
                   <option key={ed.id} value={ed.id}>
                     {ed.codigo_edital} - {ed.numero_compra}/{ed.ano_compra} ({ed.objeto_compra ? ed.objeto_compra.substring(0, 60) + '...' : ''})
+                    {ed.status !== 'sent' ? ' [Rascunho]' : ''}
+                    {!isEditalSrp(ed) ? ' [Sem SRP]' : ' [SRP]'}
                   </option>
                 ))}
               </Form.Select>
+              {avisoBloqueioEnvio && (
+                <div className="alert alert-warning py-2 px-3 mt-2 mb-0 small d-flex align-items-center gap-2">
+                  <AlertCircle size={16} />
+                  <span>{avisoBloqueioEnvio}</span>
+                </div>
+              )}
             </Form.Group>
 
             <Row className="g-3">
@@ -519,21 +662,33 @@ export const AtaForm: React.FC = () => {
           </div>
         </Col>
 
-        {/* Coluna 2: Itens da Licitação Vinculados à Ata */}
-        <Col lg={6}>
+        {/* Seção 3: Itens da Licitação Vinculados à Ata */}
+        <Col xs={12}>
           <CardBox 
             title="3. Itens da Contratação Vinculados à Ata"
             actions={
-              itensCompra && itensCompra.length > 0 && (
-                <ButtonGroup size="sm">
-                  <Button variant="outline-primary" onClick={selectAllItens}>
-                    Marcar Todos
+              <div className="d-flex align-items-center gap-2">
+                {!isSent && referenciaEdital?.situacao_licitacao === 'enviada' && (
+                  <Button
+                    size="sm"
+                    variant="outline-success"
+                    onClick={() => setShowImportarModal(true)}
+                    className="d-flex align-items-center gap-1"
+                  >
+                    <Download size={14} /> Importar itens homologados
                   </Button>
-                  <Button variant="outline-secondary" onClick={unselectAllItens}>
-                    Desmarcar Todos
-                  </Button>
-                </ButtonGroup>
-              )
+                )}
+                {itensCompra && itensCompra.length > 0 && !isSent && (
+                  <ButtonGroup size="sm">
+                    <Button variant="outline-primary" onClick={selectAllItens}>
+                      Marcar Todos
+                    </Button>
+                    <Button variant="outline-secondary" onClick={unselectAllItens}>
+                      Desmarcar Todos
+                    </Button>
+                  </ButtonGroup>
+                )}
+              </div>
             }
           >
             {itensCompra && itensCompra.length > 0 ? (
@@ -672,6 +827,67 @@ export const AtaForm: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Modal: Importar Itens Homologados da Licitação */}
+      {showImportarModal && referenciaEdital && (
+        <div className="modal show d-block" tabIndex={-1} style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title fs-6 fw-bold">Importar Itens Homologados da Licitação</h5>
+                <button type="button" className="btn-close" onClick={() => setShowImportarModal(false)}></button>
+              </div>
+              <div className="modal-body">
+                <p className="small text-muted mb-3">
+                  Escolha importar todos os itens homologados na licitação enviada ou apenas os itens vencidos por um fornecedor específico:
+                </p>
+                <div className="list-group">
+                  <button
+                    type="button"
+                    className="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+                    onClick={() => handleImportarItensHomologados(referenciaEdital.itens_homologados)}
+                  >
+                    <div>
+                      <div className="fw-bold text-primary">Todos os itens homologados</div>
+                      <div className="small text-muted">
+                        Itens: {referenciaEdital.itens_homologados.join(', ') || 'Nenhum'}
+                      </div>
+                    </div>
+                    <Badge bg="primary">{referenciaEdital.itens_homologados.length} item(ns)</Badge>
+                  </button>
+
+                  {referenciaEdital.fornecedores_vencedores.map((forn, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      className="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+                      onClick={() => handleImportarItensHomologados(forn.itensVencidos)}
+                    >
+                      <div>
+                        <div className="fw-bold font-monospace">
+                          {forn.niFornecedor} ({forn.tipoPessoaFornecedor})
+                        </div>
+                        {forn.nomeRazaoSocial && (
+                          <div className="small text-dark">{forn.nomeRazaoSocial}</div>
+                        )}
+                        <div className="small text-muted">
+                          Itens vencidos: {forn.itensVencidos.join(', ')}
+                        </div>
+                      </div>
+                      <Badge bg="success">{forn.itensVencidos.length} item(ns)</Badge>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="modal-footer">
+                <Button variant="secondary" size="sm" onClick={() => setShowImportarModal(false)}>
+                  Fechar
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </Container>
   );
 };

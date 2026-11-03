@@ -67,6 +67,28 @@ export interface LicitacaoJSON {
   itens: ItemLicitacao[];
 }
 
+export interface LicitacaoDependentes {
+  atas: number;
+  ajustes: number;
+}
+
+export interface FornecedorVencedorLicitacao {
+  niFornecedor: string;
+  tipoPessoaFornecedor: 'PJ' | 'PF' | 'PE';
+  nomeRazaoSocial?: string | null;
+  itensVencidos: number[];
+  valorSugerido?: number | null;
+}
+
+export interface ReferenciaEditalResponse {
+  edital_id: number;
+  situacao_licitacao: 'inexistente' | 'rascunho' | 'enviada';
+  licitacao_enviada_id?: number | null;
+  numeros_itens_licitacao: number[];
+  itens_homologados: number[];
+  fornecedores_vencedores: FornecedorVencedorLicitacao[];
+}
+
 export interface Licitacao {
   id: number;
   edital_id?: number;
@@ -87,6 +109,7 @@ export interface Licitacao {
   objeto_edital?: string;
   documento_json: string;
   parsed_documento?: LicitacaoJSON;
+  dependentes?: LicitacaoDependentes;
   created_at: string;
   updated_at: string;
 }

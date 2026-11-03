@@ -16,10 +16,16 @@ def get_dominios():
 def listar_licitacoes(
     status: Optional[str] = Query(None, description="Filtra por 'draft' ou 'sent'"),
     search: Optional[str] = Query(None, description="Filtro textual"),
+    edital_id: Optional[int] = Query(None, description="Filtra pelo ID do Edital"),
     session: Session = Depends(get_session)
 ):
     """Lista licitações cadastradas."""
-    return LicitacaoService.listar_licitacoes(session=session, status=status, search=search)
+    return LicitacaoService.listar_licitacoes(session=session, status=status, search=search, edital_id=edital_id)
+
+@router.get("/referencia-edital/{edital_id}")
+def obter_referencia_edital(edital_id: int, session: Session = Depends(get_session)):
+    """Obtém a situação da licitação enviada do edital, itens homologados e fornecedores vencedores."""
+    return LicitacaoService.obter_referencia_edital(session=session, edital_id=edital_id)
 
 @router.get("/{id}")
 def obter_licitacao(id: int, session: Session = Depends(get_session)):
@@ -64,6 +70,11 @@ async def consultar_protocolo_licitacao(
         raise HTTPException(status_code=401, detail="Token de autorização Bearer não informado.")
     token = authorization.replace("Bearer ", "").strip()
     return await LicitacaoService.consultar_protocolo(session=session, id=id, token=token)
+
+@router.get("/{id}/historico-protocolo")
+def obter_historico_protocolo_licitacao(id: int, session: Session = Depends(get_session)):
+    """Retorna o histórico de consultas de protocolo da licitação."""
+    return LicitacaoService.obter_historico_protocolo(session=session, id=id)
 
 @router.post("/{id}/retornar-rascunho")
 def retornar_rascunho_licitacao(id: int, session: Session = Depends(get_session)):

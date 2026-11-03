@@ -35,6 +35,11 @@ export const ajusteService = {
     return response.data;
   },
 
+  async getHistoricoProtocolo(id: number): Promise<any[]> {
+    const response = await api.get(`/api/ajustes/${id}/historico-protocolo`);
+    return response.data;
+  },
+
   async retornarRascunho(id: number): Promise<AjusteContrato> {
     const response = await api.post(`/api/ajustes/${id}/retornar-rascunho`);
     return response.data;

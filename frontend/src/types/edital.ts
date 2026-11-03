@@ -58,6 +58,12 @@ export interface EditalJSON {
   itensCompra: ItemCompra[];
 }
 
+export interface EditalDependentes {
+  licitacoes: number;
+  atas: number;
+  ajustes: number;
+}
+
 export interface Edital {
   id: number;
   municipio: number;
@@ -81,6 +87,7 @@ export interface Edital {
   pdf_nome_original?: string;
   documento_json: string;
   parsed_documento?: EditalJSON;
+  dependentes?: EditalDependentes;
   created_at: string;
   updated_at: string;
 }
@@ -101,6 +108,7 @@ export interface DominiosResponse {
   tiposBeneficio: Record<number, string>;
   criteriosJulgamento: Record<number, string>;
   categoriasItem: Record<number, string>;
+  categoriasItemLeilao?: Record<number, string>;
   amparosLegais: AmparoLegal[];
   municipios?: MunicipioAudesp[];
   entidades?: EntidadeAudesp[];

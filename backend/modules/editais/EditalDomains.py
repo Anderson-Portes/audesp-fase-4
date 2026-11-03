@@ -1,6 +1,7 @@
 from typing import Dict, List, Any
 
 # Domínio AUDESP / PNCP: Tipo de Instrumento Convocatório
+# Nota: Instrumento 4 (Edital de Chamamento Público) consta no JSON Schema do AUDESP (edital_schema.json)
 DOMINIO_INSTRUMENTOS = {
     1: "Edital",
     2: "Aviso de Contratação Direta",
@@ -40,7 +41,7 @@ MODALIDADES_PERMITIDAS_POR_INSTRUMENTO = {
     1: [1, 2, 3, 4, 5, 6, 7, 13, 14, 16, 17, 18, 19, 997, 998, 999], # Edital (inclui internacionais)
     2: [8, 14],                                                       # Aviso de Contratação Direta (Dispensa com Disputa)
     3: [8, 9, 14],                                                    # Ato que autoriza Contratação Direta (Dispensa sem Disputa ou Inexigibilidade)
-    4: [12, 14]                                                       # Edital de Chamamento Público
+    4: [12, 15]                                                       # Edital de Chamamento Público (Credenciamento / Chamada Pública)
 }
 
 # Domínio PNCP: Modo de Disputa
@@ -97,6 +98,48 @@ DOMINIO_ITEM_CATEGORIA = {
     3: "Não se aplica"
 }
 
+DOMINIO_ITEM_CATEGORIA_LEILAO = {
+    1: "Bens Imóveis",
+    2: "Bens Móveis"
+}
+
+
+def is_leilao(modalidade_id: Any) -> bool:
+    return modalidade_id in (1, 13)
+
+
+def categoria_item_normalizada(modalidade_id: Any, atual: Any) -> Any:
+    """
+    Fora de leilão a categoria é sempre "Não se aplica" (3).
+    Em leilão só valem 1 ou 2; outro valor volta a ficar None para ser escolhido.
+    """
+    if not is_leilao(modalidade_id):
+        return 3
+    return int(atual) if atual in (1, 2) else None
+
+
+def normalizar_categorias_edital(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Normaliza o campo itemCategoriaId de cada item de compra segundo a modalidade."""
+    modalidade_id = doc.get("modalidadeId")
+    itens = doc.get("itensCompra")
+    if not isinstance(itens, list):
+        return doc
+    novos_itens = []
+    for item in itens:
+        if not isinstance(item, dict):
+            continue
+        novo_item = dict(item)
+        cat = categoria_item_normalizada(modalidade_id, novo_item.get("itemCategoriaId"))
+        if cat is not None:
+            novo_item["itemCategoriaId"] = cat
+        else:
+            novo_item.pop("itemCategoriaId", None)
+        if is_leilao(modalidade_id):
+            novo_item["materialOuServico"] = "M"
+        novos_itens.append(novo_item)
+    doc["itensCompra"] = novos_itens
+    return doc
+
 def validar_regras_negocio_edital(doc: Dict[str, Any], has_pdf: bool) -> List[str]:
     """
     Executa a validação de negócio AUDESP Fase IV baseada nas colunas de
@@ -139,10 +182,14 @@ def validar_regras_negocio_edital(doc: Dict[str, Any], has_pdf: bool) -> List[st
                 id_pncp = str(pub.get("idContratacaoPNCP") or "").strip()
                 if not id_pncp or len(id_pncp) != 25 or not id_pncp.isdigit():
                     erros.append(f"Publicação {idx}: No veículo PNCP, 'idContratacaoPNCP' deve ter exatamente 25 dígitos numéricos.")
-            if v_id in (9, 10):
+            if v_id == 10:
                 nome_outro = str(pub.get("veiculoPublicacaoNome") or "").strip()
-                if not nome_outro and v_id == 10:
+                if not nome_outro:
                     erros.append(f"Publicação {idx}: Para o veículo 'Outros' (10), 'veiculoPublicacaoNome' é obrigatório.")
+            elif pub.get("veiculoPublicacaoNome"):
+                erros.append(f"Publicação {idx}: Para o veículo {v_id}, não deve ser informado 'veiculoPublicacaoNome' (apenas permitido para o veículo 10 - Outros).")
+            if v_id != 5 and pub.get("idContratacaoPNCP"):
+                erros.append(f"Publicação {idx}: Para o veículo {v_id}, não deve ser informado 'idContratacaoPNCP' (apenas permitido para o veículo 5 - PNCP).")
                     
     # Observação da documentação: Se algum veiculoPublicacao = 5 (PNCP), o codigoEdital deve ser o número de controle PNCP
     if tem_veiculo_pncp and (len(codigo_edital) != 25 or not codigo_edital.isdigit()):

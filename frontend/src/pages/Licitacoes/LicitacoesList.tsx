@@ -24,13 +24,21 @@ import {
   AlertTriangle, 
   RotateCcw,
   CheckCircle2,
-  Calendar
+  Calendar,
+  History
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import { PageHeader } from '../../components/PageHeader/PageHeader';
+import {
+  ProtocoloErrosAlert,
+  HistoricoProtocoloModal,
+  notificarResultadoProtocolo,
+} from '../../components/ProtocoloInfo/ProtocoloComponents';
+import { ImportacaoExportacaoToolbar } from '../../components/ImportacaoExportacao/ImportacaoExportacaoModal';
 import { licitacaoService } from '../../services/licitacaoService';
 import type { Licitacao } from '../../types/licitacao';
+import type { HistoricoProtocoloItem } from '../../utils/protocoloFormatter';
 import { formatDateBR, formatPncpMask } from '../../utils/formatters';
 
 export const LicitacoesList: React.FC = () => {
@@ -40,6 +48,13 @@ export const LicitacoesList: React.FC = () => {
   const [licitacoes, setLicitacoes] = useState<Licitacao[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+  const [showHistoricoModal, setShowHistoricoModal] = useState(false);
+  const [historicoLoading, setHistoricoLoading] = useState(false);
+  const [historicoItems, setHistoricoItems] = useState<HistoricoProtocoloItem[]>([]);
+  const [historicoDocInfo, setHistoricoDocInfo] = useState<{ codigo: string; protocolo?: string | null }>({
+    codigo: '',
+    protocolo: null,
+  });
 
   const carregarLicitacoes = async () => {
     try {
@@ -86,7 +101,10 @@ export const LicitacoesList: React.FC = () => {
     try {
       setActionLoadingId(id);
       const res = await licitacaoService.enviarLicitacao(id);
-      toast.success(`Licitação transmitida com sucesso! Protocolo: ${res.protocolo}`);
+      notificarResultadoProtocolo(res, {
+        prefixoSucesso: 'Licitação transmitida com sucesso!',
+        isTransmissao: true,
+      });
       carregarLicitacoes();
     } catch (err: any) {
       const detail = err.response?.data?.detail;
@@ -114,13 +132,30 @@ export const LicitacoesList: React.FC = () => {
     try {
       setActionLoadingId(id);
       const res = await licitacaoService.consultarProtocolo(id);
-      toast.success(`Situação atualizada no AUDESP: ${res.status}`);
+      notificarResultadoProtocolo(res, { isTransmissao: false });
       carregarLicitacoes();
     } catch (err: any) {
       const msg = err.response?.data?.detail || 'Erro ao consultar protocolo';
       toast.error(msg);
     } finally {
       setActionLoadingId(null);
+    }
+  };
+
+  const handleVerHistoricoProtocolo = async (lic: Licitacao) => {
+    setHistoricoDocInfo({
+      codigo: lic.codigo_edital,
+      protocolo: lic.protocolo,
+    });
+    setShowHistoricoModal(true);
+    try {
+      setHistoricoLoading(true);
+      const data = await licitacaoService.getHistoricoProtocolo(lic.id);
+      setHistoricoItems(data);
+    } catch {
+      toast.error('Erro ao carregar histórico de consultas do protocolo');
+    } finally {
+      setHistoricoLoading(false);
     }
   };
 
@@ -202,6 +237,12 @@ export const LicitacoesList: React.FC = () => {
           >
             <Plus size={18} /> Nova Licitação
           </Button>
+
+          <ImportacaoExportacaoToolbar
+            modulo="licitacoes"
+            tituloModulo="Licitações"
+            onImportSuccess={carregarLicitacoes}
+          />
         </div>
 
         {/* Busca com Form e InputGroup */}
@@ -332,6 +373,14 @@ export const LicitacoesList: React.FC = () => {
                           >
                             <RefreshCw size={14} className={isLoading ? 'spin' : ''} /> Consultar Protocolo
                           </Button>
+                          <Button
+                            variant="outline-secondary"
+                            onClick={() => handleVerHistoricoProtocolo(lic)}
+                            disabled={isLoading}
+                            title="Ver histórico de consultas de protocolo"
+                          >
+                            <History size={14} className="me-1" /> Histórico
+                          </Button>
                           {isRejected && (
                             <Button
                               variant="outline-warning"
@@ -389,13 +438,11 @@ export const LicitacoesList: React.FC = () => {
                     </div>
                   )}
 
-                  {lic.detalhes_protocolo && isRejected && (
-                    <div className="mt-2 alert alert-danger py-2 px-3 small mb-0">
-                      <strong>Retorno de Rejeição AUDESP:</strong>
-                      <pre className="mb-0 mt-1" style={{ whiteSpace: 'pre-wrap', maxHeight: '120px', overflowY: 'auto' }}>
-                        {lic.detalhes_protocolo}
-                      </pre>
-                    </div>
+                  {lic.detalhes_protocolo && (
+                    <ProtocoloErrosAlert
+                      detalhesProtocolo={lic.detalhes_protocolo}
+                      statusProtocolo={lic.status_protocolo}
+                    />
                   )}
                 </Card.Body>
               </Card>
@@ -403,6 +450,15 @@ export const LicitacoesList: React.FC = () => {
           })}
         </div>
       )}
+
+      <HistoricoProtocoloModal
+        show={showHistoricoModal}
+        onHide={() => setShowHistoricoModal(false)}
+        protocolo={historicoDocInfo.protocolo}
+        codigoDocumento={historicoDocInfo.codigo}
+        historico={historicoItems}
+        loading={historicoLoading}
+      />
     </Container>
   );
 };

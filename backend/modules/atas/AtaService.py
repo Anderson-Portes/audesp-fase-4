@@ -5,12 +5,25 @@ from datetime import datetime, date, timezone
 from fastapi import HTTPException
 from sqlmodel import Session, select, or_
 
-from core.audesp_client import enviar_ata_audesp, consultar_protocolo_audesp
+from core.audesp_client import (
+    enviar_ata_audesp,
+    consultar_protocolo_audesp,
+    extrair_erros_estruturados_audesp,
+    extrair_mensagens_protocolo_audesp,
+)
+from modules.protocolos.ProtocoloService import (
+    consultar_e_registrar_protocolo,
+    listar_historico_protocolo,
+)
 from core.audesp_domains import MUNICIPIOS_AUDESP, ENTIDADES_AUDESP
 from modules.atas.Ata import AtaRegistroPreco
 from modules.atas.AtaDomains import validar_regras_negocio_ata
 from modules.editais.Edital import Edital
 from modules.licitacoes.Licitacao import Licitacao
+from modules.licitacoes.LicitacaoDomains import (
+    selecionar_licitacao_enviada,
+    extrair_numeros_itens_licitacao,
+)
 
 
 class AtaService:
@@ -58,9 +71,20 @@ class AtaService:
         except Exception:
             documento = {}
 
+        detalhes_prot = None
+        if ata.detalhes_protocolo:
+            try:
+                detalhes_prot = json.loads(ata.detalhes_protocolo)
+            except Exception:
+                detalhes_prot = ata.detalhes_protocolo
+
         return {
             "ata": ata,
-            "documento": documento
+            "documento": documento,
+            "parsed_detalhes_protocolo": detalhes_prot,
+            "erros_formatados": extrair_mensagens_protocolo_audesp(detalhes_prot),
+            "erros_detalhados": extrair_erros_estruturados_audesp(detalhes_prot),
+            "historico_protocolo": listar_historico_protocolo(session, "ata", ata.id, ata.protocolo),
         }
 
     @staticmethod
@@ -151,22 +175,68 @@ class AtaService:
         except Exception:
             raise HTTPException(status_code=400, detail="JSON da ata está corrompido.")
 
-        # Valida regras de negócio do schema
-        erros_validacao = validar_regras_negocio_ata(documento)
+        # Localiza edital vinculado e licitação enviada para validação cruzada
+        edital_vinculado = session.get(Edital, ata.edital_id) if ata.edital_id else None
+        if not edital_vinculado and ata.codigo_edital:
+            edital_vinculado = session.exec(
+                select(Edital).where(
+                    Edital.codigo_edital == ata.codigo_edital,
+                    Edital.municipio == ata.municipio,
+                    Edital.entidade == ata.entidade
+                )
+            ).first()
 
-        # Cross-validation com Licitacao vinculada (se houver)
-        if ata.licitacao_id:
-            licitacao = session.get(Licitacao, ata.licitacao_id)
-            if licitacao and licitacao.documento_json:
-                try:
-                    lic_doc = json.loads(licitacao.documento_json)
-                    lic_itens = {str(item.get("numeroItem")) for item in lic_doc.get("item", []) if item.get("numeroItem") is not None}
-                    ata_itens = [str(x) for x in documento.get("numeroItem", [])]
-                    for item_num in ata_itens:
-                        if item_num not in lic_itens:
-                            erros_validacao.append(f"O item '{item_num}' informado na ata não consta nos itens da licitação vinculada.")
-                except Exception:
-                    pass
+        erros_fluxo: List[str] = []
+        numeros_itens_lic = None
+        edital_sem_pncp = False
+        edital_codigo_base = ata.codigo_edital
+
+        if not edital_vinculado:
+            erros_fluxo.append("O edital vinculado não foi encontrado.")
+        else:
+            edital_sem_pncp = bool(edital_vinculado.sem_pncp)
+            edital_codigo_base = edital_vinculado.codigo_edital
+            if edital_vinculado.status != "sent":
+                erros_fluxo.append("O edital ainda não foi enviado ao AUDESP.")
+            try:
+                ed_doc = json.loads(edital_vinculado.documento_json) if edital_vinculado.documento_json else {}
+            except Exception:
+                ed_doc = {}
+            if not ed_doc.get("srp", False):
+                erros_fluxo.append("Ata de registro de preços exige edital SRP.")
+
+            licitacoes_edital = list(
+                session.exec(
+                    select(Licitacao).where(
+                        or_(
+                            Licitacao.edital_id == edital_vinculado.id,
+                            (Licitacao.codigo_edital == edital_vinculado.codigo_edital) &
+                            (Licitacao.municipio == edital_vinculado.municipio) &
+                            (Licitacao.entidade == edital_vinculado.entidade)
+                        )
+                    )
+                ).all()
+            )
+            if not licitacoes_edital:
+                erros_fluxo.append("O edital ainda não tem licitação.")
+            else:
+                lic_enviada = selecionar_licitacao_enviada(licitacoes_edital)
+                if not lic_enviada:
+                    erros_fluxo.append("A licitação do edital ainda não foi enviada ao AUDESP.")
+                else:
+                    try:
+                        lic_doc = json.loads(lic_enviada.documento_json) if lic_enviada.documento_json else {}
+                    except Exception:
+                        lic_doc = {}
+                    numeros_itens_lic = extrair_numeros_itens_licitacao(lic_doc)
+
+        # Valida regras de negócio do schema + itens da licitação enviada
+        erros_validacao = erros_fluxo + validar_regras_negocio_ata(
+            documento,
+            numeros_itens_licitacao=numeros_itens_lic,
+            edital_sem_pncp=edital_sem_pncp,
+            edital_codigo_base=edital_codigo_base
+        )
 
         if erros_validacao and not forcar:
             raise HTTPException(
@@ -181,17 +251,53 @@ class AtaService:
         )
 
         if resultado.get("sucesso"):
+            protocolo = resultado.get("protocolo")
             ata.status = "sent"
-            ata.protocolo = resultado.get("protocolo")
+            ata.protocolo = protocolo
             ata.status_protocolo = "Recebido"
             ata.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
             ata.updated_at = datetime.now(timezone.utc)
             session.commit()
             session.refresh(ata)
+
+            # Consulta automaticamente o protocolo logo após a transmissão
+            consulta_auto = None
+            if protocolo:
+                consulta_auto = consultar_e_registrar_protocolo(
+                    session=session,
+                    token=token_audesp,
+                    modulo="ata",
+                    registro_id=ata.id,
+                    codigo_documento=ata.codigo_ata or f"{ata.numero_ata_registro_preco}/{ata.ano_ata}",
+                    protocolo=protocolo,
+                    origem="envio_automatico",
+                    status_padrao="Recebido",
+                )
+                if consulta_auto.get("sucesso"):
+                    ata.status_protocolo = consulta_auto.get("status") or "Recebido"
+                    ata.detalhes_protocolo = json.dumps(consulta_auto.get("dados", {}), ensure_ascii=False)
+                    ata.updated_at = datetime.now(timezone.utc)
+                    session.add(ata)
+                    session.commit()
+                    session.refresh(ata)
+
+            erros_formatados = consulta_auto.get("erros_formatados", []) if consulta_auto else []
+            erros_detalhados = consulta_auto.get("erros_detalhados", []) if consulta_auto else []
+            is_rejeitado = bool(consulta_auto.get("is_rejeitado")) if consulta_auto else False
+            possui_erros = bool(consulta_auto.get("possui_erros")) if consulta_auto else False
+
             return {
                 "sucesso": True,
                 "mensagem": "Ata de Registro de Preços transmitida com sucesso ao TCESP!",
                 "protocolo": ata.protocolo,
+                "status_protocolo": ata.status_protocolo or "Recebido",
+                "is_rejeitado": is_rejeitado,
+                "possui_erros": possui_erros,
+                "erros_formatados": erros_formatados,
+                "erros_detalhados": erros_detalhados,
+                "dados": consulta_auto.get("dados") if consulta_auto else resultado.get("dados"),
+                "detalhes": consulta_auto.get("dados") if consulta_auto else resultado.get("dados"),
+                "historico_protocolo": consulta_auto.get("historico", []) if consulta_auto else [],
                 "ata": ata
             }
         else:
@@ -212,16 +318,25 @@ class AtaService:
         ata_id: int,
         token_audesp: str
     ) -> Dict[str, Any]:
-        """Consulta a situação do processamento do protocolo no TCESP."""
+        """Consulta a situação do processamento do protocolo no TCESP e grava no histórico."""
         ata = session.get(AtaRegistroPreco, ata_id)
         if not ata or not ata.protocolo:
             raise HTTPException(status_code=400, detail="Esta ata não possui protocolo gerado para consulta.")
 
-        resultado = consultar_protocolo_audesp(token=token_audesp, protocolo=ata.protocolo)
-        if resultado.get("sucesso"):
-            novo_status = resultado.get("status")
+        consulta = consultar_e_registrar_protocolo(
+            session=session,
+            token=token_audesp,
+            modulo="ata",
+            registro_id=ata.id,
+            codigo_documento=ata.codigo_ata or f"{ata.numero_ata_registro_preco}/{ata.ano_ata}",
+            protocolo=ata.protocolo,
+            origem="consulta_manual",
+            status_padrao=ata.status_protocolo or "Recebido",
+        )
+        if consulta.get("sucesso"):
+            novo_status = consulta.get("status")
             ata.status_protocolo = novo_status
-            ata.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
+            ata.detalhes_protocolo = json.dumps(consulta.get("dados", {}), ensure_ascii=False)
             ata.updated_at = datetime.now(timezone.utc)
             session.commit()
             session.refresh(ata)
@@ -229,13 +344,27 @@ class AtaService:
                 "sucesso": True,
                 "protocolo": ata.protocolo,
                 "status": novo_status,
-                "detalhes": resultado.get("dados")
+                "is_rejeitado": consulta.get("is_rejeitado", False),
+                "possui_erros": consulta.get("possui_erros", False),
+                "erros_formatados": consulta.get("erros_formatados", []),
+                "erros_detalhados": consulta.get("erros_detalhados", []),
+                "dados": consulta.get("dados"),
+                "detalhes": consulta.get("dados"),
+                "historico": consulta.get("historico", []),
             }
         else:
             return {
                 "sucesso": False,
-                "mensagem": resultado.get("mensagem", "Erro ao consultar protocolo.")
+                "mensagem": consulta.get("mensagem", "Erro ao consultar protocolo.")
             }
+
+    @staticmethod
+    def obter_historico_protocolo(session: Session, ata_id: int) -> List[Dict[str, Any]]:
+        """Retorna o histórico de consultas de protocolo de uma ata."""
+        ata = session.get(AtaRegistroPreco, ata_id)
+        if not ata:
+            raise HTTPException(status_code=404, detail="Ata não encontrada.")
+        return listar_historico_protocolo(session, "ata", ata.id, ata.protocolo)
 
     @staticmethod
     def retornar_rascunho(session: Session, ata_id: int) -> AtaRegistroPreco:

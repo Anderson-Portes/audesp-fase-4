@@ -59,6 +59,7 @@ def enviar_ajuste(
 
 
 @router.get("/{ajuste_id}/consultar-protocolo")
+@router.post("/{ajuste_id}/consultar-protocolo")
 def consultar_protocolo(
     ajuste_id: int,
     authorization: Optional[str] = Header(None),
@@ -70,6 +71,15 @@ def consultar_protocolo(
     token_audesp = authorization.replace("Bearer ", "").strip()
 
     return AjusteService.consultar_protocolo(session, ajuste_id, token_audesp)
+
+
+@router.get("/{ajuste_id}/historico-protocolo")
+def obter_historico_protocolo(
+    ajuste_id: int,
+    session: Session = Depends(get_session)
+):
+    """Retorna o histórico de consultas de protocolo do ajuste."""
+    return AjusteService.obter_historico_protocolo(session, ajuste_id)
 
 
 @router.post("/{ajuste_id}/retornar-rascunho", response_model=AjusteContrato)

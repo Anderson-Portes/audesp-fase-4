@@ -59,6 +59,7 @@ async def enviar_ata(
 
 
 @router.get("/{ata_id}/consultar-protocolo")
+@router.post("/{ata_id}/consultar-protocolo")
 async def consultar_protocolo(
     ata_id: int,
     authorization: Optional[str] = Header(None),
@@ -70,6 +71,15 @@ async def consultar_protocolo(
     token_audesp = authorization.replace("Bearer ", "").strip()
 
     return await AtaService.consultar_protocolo(session, ata_id, token_audesp)
+
+
+@router.get("/{ata_id}/historico-protocolo")
+def obter_historico_protocolo(
+    ata_id: int,
+    session: Session = Depends(get_session)
+):
+    """Retorna o histórico de consultas de protocolo da ata."""
+    return AtaService.obter_historico_protocolo(session, ata_id)
 
 
 @router.post("/{ata_id}/retornar-rascunho", response_model=AtaRegistroPreco)

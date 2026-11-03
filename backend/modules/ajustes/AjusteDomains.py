@@ -1,4 +1,5 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Set
+from modules.licitacoes.LicitacaoDomains import validar_itens_contra_licitacao
 
 # Domínio PNCP: Tipo de Contrato
 DOMINIO_TIPO_CONTRATO = {
@@ -78,7 +79,13 @@ OBJETOS_POR_CATEGORIA: Dict[int, List[int]] = {
 TIPOS_CONTRATO_COM_VIGENCIA = {1, 2, 3, 4, 5, 8, 12}
 
 
-def validar_regras_negocio_ajuste(dados: Dict[str, Any], edital_srp: bool = False) -> List[str]:
+def validar_regras_negocio_ajuste(
+    dados: Dict[str, Any],
+    edital_srp: bool = False,
+    numeros_itens_licitacao: Optional[Set[int]] = None,
+    ata_id_vinculada: Optional[int] = None,
+    ata_vinculada_status: Optional[str] = None
+) -> List[str]:
     """Valida as regras de negócio de envio de Ajuste/Contrato conforme o schema do TCESP."""
     erros = []
     
@@ -108,15 +115,27 @@ def validar_regras_negocio_ajuste(dados: Dict[str, Any], edital_srp: bool = Fals
             digits_ata = "".join(filter(str.isdigit, cod_ata))
             if len(digits_ata) != 31:
                 erros.append("Na adesão, informe o ID da Ata PNCP com 31 dígitos ou deixe o campo vazio.")
+
+        ger_jurisd = descritor.get("gerenciadoraJurisdicionada")
+        if ger_jurisd is True:
+            if not descritor.get("municipioGerenciador") or not descritor.get("entidadeGerenciadora"):
+                erros.append("Na adesão a entidade jurisdicionada ao TCE-SP, informe 'municipioGerenciador' e 'entidadeGerenciadora'.")
+        elif ger_jurisd is False:
+            cnpj_ger = "".join(filter(str.isdigit, str(descritor.get("cnpjGerenciadora") or "")))
+            if len(cnpj_ger) != 14:
+                erros.append("Na adesão a entidade não jurisdicionada ao TCE-SP, informe 'cnpjGerenciadora' com 14 dígitos.")
     else:
         if cod_ata and len(cod_ata) > 31:
             erros.append("Código da Ata deve ter no máximo 31 caracteres.")
 
-        # Se o edital de origem for SRP e não for adesão/participação externa, a Ata é obrigatória
+        # Regra AUDESP (TCE-SP): Se o edital de origem for SRP e não for adesão/participação externa,
+        # o Ajuste decorre de uma Ata de Registro de Preços e exige codigoAta
         if edital_srp and not cod_ata:
             erros.append(
-                "O Edital vinculado é do tipo SRP (Sistema de Registro de Preços): a vinculação da Ata de Registro de Preços é obrigatória no Ajuste quando não for adesão."
+                "O Edital vinculado é do tipo SRP (Sistema de Registro de Preços): informe ou vincule o Código da Ata de Registro de Preços (codigoAta) no Ajuste."
             )
+        if ata_id_vinculada is not None and ata_vinculada_status and ata_vinculada_status != "sent":
+            erros.append("A Ata de Registro de Preços vinculada ainda não foi enviada ao AUDESP.")
         
     tipo_contrato = dados.get("tipoContratoId")
     if not tipo_contrato:
@@ -189,9 +208,29 @@ def validar_regras_negocio_ajuste(dados: Dict[str, Any], edital_srp: bool = Fals
 
     if dt_inicio and dt_fim and dt_fim < dt_inicio:
         erros.append("A data de término da vigência não pode ser anterior à data inicial.")
+
+    despesas = dados.get("despesas")
+    if isinstance(despesas, list) and despesas:
+        for idx, desp in enumerate(despesas, start=1):
+            d_str = str(desp or "").strip()
+            if len(d_str) != 8:
+                erros.append(f"Classificação de despesa {idx} ('{d_str}') deve conter exatamente 8 caracteres.")
+        if tipo_contrato == 7 and len(despesas) > 1:
+            erros.append("Para Empenho (tipoContratoId = 7), informe no máximo 1 classificação de despesa.")
+
+    cod_unidade = str(dados.get("codigoUnidade") or "").strip()
+    if cod_unidade and len(cod_unidade) > 30:
+        erros.append("O campo 'codigoUnidade' deve ter no máximo 30 caracteres.")
         
     itens = dados.get("itens", [])
     if not itens or len(itens) == 0:
         erros.append("É necessário vincular ao menos 1 item contratado.")
+    else:
+        erros.extend(
+            validar_itens_contra_licitacao(
+                itens,
+                None if adesao else numeros_itens_licitacao
+            )
+        )
         
     return erros

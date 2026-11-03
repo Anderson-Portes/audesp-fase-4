@@ -20,14 +20,23 @@ import {
   RotateCcw,
   CheckCircle2,
   Calendar,
-  AlertTriangle
+  AlertTriangle,
+  History
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import { PageHeader } from '../../components/PageHeader/PageHeader';
 import { CardBox } from '../../components/CardBox/CardBox';
+import {
+  ProtocoloErrosAlert,
+  HistoricoProtocoloModal,
+  notificarResultadoProtocolo,
+} from '../../components/ProtocoloInfo/ProtocoloComponents';
+import { ImportacaoExportacaoToolbar } from '../../components/ImportacaoExportacao/ImportacaoExportacaoModal';
 import { ataService } from '../../services/ataService';
 import type { AtaRegistroPreco } from '../../types/ata';
+import type { HistoricoProtocoloItem } from '../../utils/protocoloFormatter';
+import { extrairErrosDetalhadosProtocolo } from '../../utils/protocoloFormatter';
 import { formatDateBR } from '../../utils/formatters';
 
 export const AtasList: React.FC = () => {
@@ -37,6 +46,13 @@ export const AtasList: React.FC = () => {
   const [atas, setAtas] = useState<AtaRegistroPreco[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+  const [showHistoricoModal, setShowHistoricoModal] = useState(false);
+  const [historicoLoading, setHistoricoLoading] = useState(false);
+  const [historicoItems, setHistoricoItems] = useState<HistoricoProtocoloItem[]>([]);
+  const [historicoDocInfo, setHistoricoDocInfo] = useState<{ codigo: string; protocolo?: string | null }>({
+    codigo: '',
+    protocolo: null,
+  });
 
   const carregarAtas = async () => {
     try {
@@ -67,14 +83,32 @@ export const AtasList: React.FC = () => {
       setActionLoadingId(id);
       const res = await ataService.enviarAta(id);
       if (res.sucesso) {
-        toast.success(`Ata transmitida com sucesso! Protocolo: ${res.protocolo}`);
+        notificarResultadoProtocolo(res, {
+          prefixoSucesso: 'Ata transmitida com sucesso!',
+          isTransmissao: true,
+        });
         carregarAtas();
       } else {
         toast.error(res.mensagem || 'Erro na transmissão');
       }
     } catch (err: any) {
-      const msg = err.response?.data?.detail?.mensagem || err.response?.data?.detail || 'Erro ao enviar ata';
-      toast.error(msg);
+      const detail = err.response?.data?.detail;
+      if (detail && detail.erros && detail.erros.length > 0) {
+        toast.error(
+          <div>
+            <strong>Erros de Validação da Ata:</strong>
+            <ul className="mb-0 ps-3 mt-1 small">
+              {detail.erros.map((e: string, i: number) => (
+                <li key={i}>{e}</li>
+              ))}
+            </ul>
+          </div>,
+          { duration: 7000 }
+        );
+      } else {
+        const msg = detail?.mensagem || detail || 'Erro ao enviar ata';
+        toast.error(msg);
+      }
     } finally {
       setActionLoadingId(null);
     }
@@ -85,7 +119,7 @@ export const AtasList: React.FC = () => {
       setActionLoadingId(id);
       const res = await ataService.consultarProtocolo(id);
       if (res.sucesso) {
-        toast.success(`Status atualizado: ${res.status}`);
+        notificarResultadoProtocolo(res, { isTransmissao: false });
         carregarAtas();
       } else {
         toast.error(res.mensagem || 'Erro ao consultar protocolo');
@@ -94,6 +128,23 @@ export const AtasList: React.FC = () => {
       toast.error(err.response?.data?.detail || 'Falha na consulta');
     } finally {
       setActionLoadingId(null);
+    }
+  };
+
+  const handleVerHistoricoProtocolo = async (ata: AtaRegistroPreco) => {
+    setHistoricoDocInfo({
+      codigo: ata.codigo_ata || `${ata.numero_ata_registro_preco}/${ata.ano_ata}`,
+      protocolo: ata.protocolo,
+    });
+    setShowHistoricoModal(true);
+    try {
+      setHistoricoLoading(true);
+      const data = await ataService.getHistoricoProtocolo(ata.id);
+      setHistoricoItems(data);
+    } catch {
+      toast.error('Erro ao carregar histórico de consultas do protocolo');
+    } finally {
+      setHistoricoLoading(false);
     }
   };
 
@@ -149,6 +200,12 @@ export const AtasList: React.FC = () => {
           >
             <Plus size={18} /> Nova Ata de Registro
           </Button>
+
+          <ImportacaoExportacaoToolbar
+            modulo="atas"
+            tituloModulo="Atas de Registro de Preços"
+            onImportSuccess={carregarAtas}
+          />
         </div>
 
         {/* Busca com Form e InputGroup */}
@@ -231,104 +288,151 @@ export const AtasList: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {atas.map((ata) => (
-                <tr key={ata.id}>
-                  <td>
-                    <span className="fw-bold text-dark d-block">
-                      {ata.numero_ata_registro_preco}/{ata.ano_ata}
-                    </span>
-                    <small className="text-muted font-monospace">{ata.codigo_ata}</small>
-                  </td>
-                  <td>
-                    <Badge bg="light" text="dark" className="border">
-                      {ata.codigo_edital}
-                    </Badge>
-                    <small className="d-block text-muted">Ano compra: {ata.ano_compra}</small>
-                  </td>
-                  <td>
-                    <span className="small text-muted d-block">
-                      <Calendar size={13} className="me-1 inline" />
-                      {formatDateBR(ata.data_vigencia_inicio)} até {formatDateBR(ata.data_vigencia_fim)}
-                    </span>
-                  </td>
-                  <td>
-                    <span className="small">{formatDateBR(ata.data_assinatura)}</span>
-                  </td>
-                  <td>
-                    {ata.status === 'draft' && (
-                      <Badge bg="secondary">Rascunho</Badge>
-                    )}
-                    {ata.status === 'sent' && (
-                      <div>
-                        <Badge bg="success" className="d-inline-flex align-items-center gap-1">
-                          <CheckCircle2 size={12} />
-                          {ata.status_protocolo || 'Transmitida'}
+              {atas.map((ata) => {
+                const isRejected = (ata.status_protocolo || '').toLowerCase().includes('rejeitado');
+                const errosAta = extrairErrosDetalhadosProtocolo(ata.detalhes_protocolo);
+                const mostrarLinhaErros = isRejected || errosAta.length > 0;
+
+                return (
+                  <React.Fragment key={ata.id}>
+                    <tr>
+                      <td>
+                        <span className="fw-bold text-dark d-block">
+                          {ata.numero_ata_registro_preco}/{ata.ano_ata}
+                        </span>
+                        <small className="text-muted font-monospace">{ata.codigo_ata}</small>
+                      </td>
+                      <td>
+                        <Badge bg="light" text="dark" className="border">
+                          {ata.codigo_edital}
                         </Badge>
-                        {ata.protocolo && (
-                          <span className="d-block small font-monospace text-muted mt-1">
-                            Prot: {ata.protocolo}
-                          </span>
+                        <small className="d-block text-muted">Ano compra: {ata.ano_compra}</small>
+                      </td>
+                      <td>
+                        <span className="small text-muted d-block">
+                          <Calendar size={13} className="me-1 inline" />
+                          {formatDateBR(ata.data_vigencia_inicio)} até {formatDateBR(ata.data_vigencia_fim)}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="small">{formatDateBR(ata.data_assinatura)}</span>
+                      </td>
+                      <td>
+                        {ata.status === 'draft' && (
+                          <Badge bg="secondary">Rascunho</Badge>
                         )}
-                      </div>
-                    )}
-                    {ata.status === 'error' && (
-                      <Badge bg="danger" className="d-inline-flex align-items-center gap-1">
-                        <AlertTriangle size={12} />
-                        Falha no Envio
-                      </Badge>
-                    )}
-                  </td>
-                  <td className="text-end">
-                    <ButtonGroup size="sm">
-                      {ata.status === 'draft' ? (
-                        <>
-                          <Button
-                            variant="outline-primary"
-                            onClick={() => navigate(`/atas/${ata.id}`)}
-                            disabled={actionLoadingId === ata.id}
-                            title="Editar rascunho"
-                          >
-                            <Edit size={14} className="me-1" /> Editar
-                          </Button>
-                          <Button
-                            variant="success"
-                            onClick={() => handleEnviar(ata.id, ata.numero_ata_registro_preco)}
-                            disabled={actionLoadingId === ata.id}
-                            title="Transmitir para o AUDESP"
-                          >
-                            <Send size={14} className="me-1" /> Transmitir
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          {ata.protocolo && (
-                            <Button
-                              variant="outline-info"
-                              onClick={() => handleConsultarProtocolo(ata.id)}
-                              disabled={actionLoadingId === ata.id}
-                              title="Consultar status no TCESP"
+                        {ata.status === 'sent' && (
+                          <div>
+                            <Badge
+                              bg={
+                                isRejected
+                                  ? 'danger'
+                                  : (ata.status_protocolo || '').toLowerCase().includes('armazenado')
+                                  ? 'success'
+                                  : 'primary'
+                              }
+                              className="d-inline-flex align-items-center gap-1"
                             >
-                              <RefreshCw size={14} className={`me-1 ${actionLoadingId === ata.id ? 'spin' : ''}`} /> Consultar Protocolo
-                            </Button>
+                              {isRejected ? <AlertTriangle size={12} /> : <CheckCircle2 size={12} />}
+                              {ata.status_protocolo || 'Transmitida'}
+                            </Badge>
+                            {ata.protocolo && (
+                              <span className="d-block small font-monospace text-muted mt-1">
+                                Prot: {ata.protocolo}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {ata.status === 'error' && (
+                          <Badge bg="danger" className="d-inline-flex align-items-center gap-1">
+                            <AlertTriangle size={12} />
+                            Falha no Envio
+                          </Badge>
+                        )}
+                      </td>
+                      <td className="text-end">
+                        <ButtonGroup size="sm">
+                          {ata.status === 'draft' ? (
+                            <>
+                              <Button
+                                variant="outline-primary"
+                                onClick={() => navigate(`/atas/${ata.id}`)}
+                                disabled={actionLoadingId === ata.id}
+                                title="Editar rascunho"
+                              >
+                                <Edit size={14} className="me-1" /> Editar
+                              </Button>
+                              <Button
+                                variant="success"
+                                onClick={() => handleEnviar(ata.id, ata.numero_ata_registro_preco)}
+                                disabled={actionLoadingId === ata.id}
+                                title="Transmitir para o AUDESP"
+                              >
+                                <Send size={14} className="me-1" /> Transmitir
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              {ata.protocolo && (
+                                <>
+                                  <Button
+                                    variant="outline-info"
+                                    onClick={() => handleConsultarProtocolo(ata.id)}
+                                    disabled={actionLoadingId === ata.id}
+                                    title="Consultar status no TCESP"
+                                  >
+                                    <RefreshCw size={14} className={`me-1 ${actionLoadingId === ata.id ? 'spin' : ''}`} /> Consultar Protocolo
+                                  </Button>
+                                  <Button
+                                    variant="outline-secondary"
+                                    onClick={() => handleVerHistoricoProtocolo(ata)}
+                                    disabled={actionLoadingId === ata.id}
+                                    title="Ver histórico de consultas de protocolo"
+                                  >
+                                    <History size={14} className="me-1" /> Histórico
+                                  </Button>
+                                </>
+                              )}
+                              <Button
+                                variant="outline-warning"
+                                onClick={() => handleRetornarRascunho(ata.id)}
+                                disabled={actionLoadingId === ata.id}
+                                title="Reabrir para rascunho"
+                              >
+                                <RotateCcw size={14} className="me-1" /> Destravar
+                              </Button>
+                            </>
                           )}
-                          <Button
-                            variant="outline-warning"
-                            onClick={() => handleRetornarRascunho(ata.id)}
-                            disabled={actionLoadingId === ata.id}
-                            title="Reabrir para rascunho"
-                          >
-                            <RotateCcw size={14} className="me-1" /> Destravar
-                          </Button>
-                        </>
-                      )}
-                    </ButtonGroup>
-                  </td>
-                </tr>
-              ))}
+                        </ButtonGroup>
+                      </td>
+                    </tr>
+                    {mostrarLinhaErros && (
+                      <tr>
+                        <td colSpan={6} className="border-top-0 pt-0">
+                          <ProtocoloErrosAlert
+                            errosDetalhados={errosAta}
+                            statusProtocolo={ata.status_protocolo}
+                            className="mt-1"
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </Table>
         )}
       </CardBox>
+
+      <HistoricoProtocoloModal
+        show={showHistoricoModal}
+        onHide={() => setShowHistoricoModal(false)}
+        protocolo={historicoDocInfo.protocolo}
+        codigoDocumento={historicoDocInfo.codigo}
+        historico={historicoItems}
+        loading={historicoLoading}
+      />
     </Container>
   );
 };

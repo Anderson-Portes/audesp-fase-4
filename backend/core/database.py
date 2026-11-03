@@ -1,5 +1,6 @@
 import os
 from typing import Generator
+from urllib.parse import quote_plus
 from dotenv import load_dotenv
 from sqlmodel import create_engine, SQLModel, Session
 
@@ -8,15 +9,15 @@ load_dotenv()
 
 # Lê as credenciais do .env
 DB_USER = os.getenv("DB_USERNAME") or os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_PASSWORD = os.getenv("DB_PASSWORD") or ""
 if DB_PASSWORD:
     DB_PASSWORD = DB_PASSWORD.strip('"\'')
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
 DB_PORT = os.getenv("DB_PORT", "3306")
 DB_NAME = os.getenv("DB_DATABASE") or os.getenv("DB_NAME", "AUDESP_FASE_4")
 
-# Monta a URL do banco dinamicamente
-DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+# Monta a URL do banco dinamicamente (quote_plus escapa caracteres especiais como @ e # na senha)
+DATABASE_URL = f"mysql+pymysql://{DB_USER}:{quote_plus(DB_PASSWORD)}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 engine = create_engine(DATABASE_URL, echo=True)
 

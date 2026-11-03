@@ -76,6 +76,13 @@ export const editalService = {
     mensagem: string;
     protocolo: string;
     status_protocolo: string;
+    is_rejeitado?: boolean;
+    possui_erros?: boolean;
+    erros_formatados?: string[];
+    erros_detalhados?: any[];
+    dados?: any;
+    detalhes?: any;
+    historico_protocolo?: any[];
   }> {
     const response = await api.post(`/api/editais/${id}/enviar`);
     return response.data;
@@ -85,9 +92,20 @@ export const editalService = {
     sucesso: boolean;
     protocolo: string;
     status: string;
+    is_rejeitado?: boolean;
+    possui_erros?: boolean;
+    erros_formatados?: string[];
+    erros_detalhados?: any[];
     dados?: any;
+    detalhes?: any;
+    historico?: any[];
   }> {
     const response = await api.post(`/api/editais/${id}/consultar-protocolo`);
+    return response.data;
+  },
+
+  async getHistoricoProtocolo(id: number): Promise<any[]> {
+    const response = await api.get(`/api/editais/${id}/historico-protocolo`);
     return response.data;
   },
 

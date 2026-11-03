@@ -21,19 +21,36 @@ import {
   AlertCircle,
   RefreshCw,
   RotateCcw,
-  CheckCircle2
+  CheckCircle2,
+  Download,
+  Plus,
+  Trash2,
+  History
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import { PageHeader } from '../../components/PageHeader/PageHeader';
 import { CardBox } from '../../components/CardBox/CardBox';
-import { MunicipioEntidadeSelect } from '../../components/MunicipioEntidadeSelect/MunicipioEntidadeSelect';
+import {
+  ProtocoloErrosAlert,
+  HistoricoProtocoloModal,
+  notificarResultadoProtocolo,
+} from '../../components/ProtocoloInfo/ProtocoloComponents';
+import {
+  MunicipioEntidadeSelect,
+  getSavedMunicipio,
+  getSavedEntidade
+} from '../../components/MunicipioEntidadeSelect/MunicipioEntidadeSelect';
 import { ajusteService } from '../../services/ajusteService';
 import { editalService } from '../../services/editalService';
+import { licitacaoService } from '../../services/licitacaoService';
 import { ataService } from '../../services/ataService';
 import type { Edital } from '../../types/edital';
 import type { AtaRegistroPreco } from '../../types/ata';
+import type { ReferenciaEditalResponse, FornecedorVencedorLicitacao } from '../../types/licitacao';
 import type { DominiosAjusteResponse } from '../../types/ajuste';
+import type { HistoricoProtocoloItem } from '../../utils/protocoloFormatter';
+import { formatBRL, stripMask } from '../../utils/formatters';
 
 export const AjusteForm: React.FC = () => {
   const navigate = useNavigate();
@@ -50,11 +67,15 @@ export const AjusteForm: React.FC = () => {
   const [protocolo, setProtocolo] = useState<string | null>(null);
   const [statusProtocolo, setStatusProtocolo] = useState<string | null>(null);
   const [detalhesProtocolo, setDetalhesProtocolo] = useState<any>(null);
+  const [historicoProtocolo, setHistoricoProtocolo] = useState<HistoricoProtocoloItem[]>([]);
+  const [showHistoricoModal, setShowHistoricoModal] = useState<boolean>(false);
 
   // Listas de origem para autopreenchimento
   const [editais, setEditais] = useState<Edital[]>([]);
   const [atas, setAtas] = useState<AtaRegistroPreco[]>([]);
   const [selectedEdital, setSelectedEdital] = useState<any>(null);
+  const [referenciaEdital, setReferenciaEdital] = useState<ReferenciaEditalResponse | null>(null);
+  const [showFornecedorModal, setShowFornecedorModal] = useState<boolean>(false);
 
   // Vínculos
   const [origemTipo, setOrigemTipo] = useState<'edital' | 'ata'>('edital');
@@ -62,9 +83,13 @@ export const AjusteForm: React.FC = () => {
   const [ataId, setAtaId] = useState<number | ''>('');
 
   // 1. Descritor
-  const [municipio, setMunicipio] = useState<number>(7071);
-  const [entidade, setEntidade] = useState<number>(11310);
+  const [municipio, setMunicipio] = useState<number>(() => getSavedMunicipio(7071));
+  const [entidade, setEntidade] = useState<number>(() => getSavedEntidade(11310));
   const [adesaoParticipacao, setAdesaoParticipacao] = useState<boolean>(false);
+  const [gerenciadoraJurisdicionada, setGerenciadoraJurisdicionada] = useState<boolean>(false);
+  const [cnpjGerenciadora, setCnpjGerenciadora] = useState<string>('');
+  const [municipioGerenciador, setMunicipioGerenciador] = useState<number | ''>('');
+  const [entidadeGerenciadora, setEntidadeGerenciadora] = useState<number | ''>('');
   const [codigoEdital, setCodigoEdital] = useState('');
   const [codigoAta, setCodigoAta] = useState('');
   const [codigoContrato, setCodigoContrato] = useState('');
@@ -78,6 +103,9 @@ export const AjusteForm: React.FC = () => {
   const [categoriaProcessoId, setCategoriaProcessoId] = useState<number>(2); // Compras
   const [tipoObjetoContrato, setTipoObjetoContrato] = useState<number>(11); // Outros materiais de consumo
   const [receita, setReceita] = useState<boolean>(false);
+  const [codigoUnidade, setCodigoUnidade] = useState<string>('');
+  const [despesas, setDespesas] = useState<string[]>([]);
+  const [novaDespesa, setNovaDespesa] = useState<string>('');
 
   // 3. Fornecedor Contratado
   const [tipoPessoaFornecedor, setTipoPessoaFornecedor] = useState<'PJ' | 'PF' | 'PE'>('PJ');
@@ -95,6 +123,7 @@ export const AjusteForm: React.FC = () => {
   const [informacaoComplementar, setInformacaoComplementar] = useState('');
   const [valorInicial, setValorInicial] = useState<number>(0);
   const [valorGlobal, setValorGlobal] = useState<number>(0);
+  const [valorAcumulado, setValorAcumulado] = useState<number | ''>('');
   const [numeroParcelas, setNumeroParcelas] = useState<number>(1);
   const [valorParcela, setValorParcela] = useState<number>(0);
 
@@ -115,7 +144,7 @@ export const AjusteForm: React.FC = () => {
         const [doms, eds, atList] = await Promise.all([
           ajusteService.getDominios(),
           editalService.getEditais(),
-          ataService.getAtas()
+          ataService.getAtas(),
         ]);
         setDominios(doms);
         setEditais(eds);
@@ -127,18 +156,40 @@ export const AjusteForm: React.FC = () => {
     carregarDadosIniciais();
   }, []);
 
+  // Mantém tipoObjetoContrato compatível com categoriaProcessoId
+  useEffect(() => {
+    if (dominios?.objetosPorCategoria) {
+      const permitidos = dominios.objetosPorCategoria[categoriaProcessoId] || [];
+      if (permitidos.length > 0 && !permitidos.includes(tipoObjetoContrato)) {
+        setTipoObjetoContrato(permitidos[0]);
+      }
+    }
+  }, [categoriaProcessoId, dominios]);
+
   // Carrega dados se for edição
   useEffect(() => {
     if (isEditing && id) {
       const loadAjuste = async () => {
         try {
           setLoading(true);
-          const { ajuste, documento } = await ajusteService.getAjusteById(Number(id));
+          const resp = await ajusteService.getAjusteById(Number(id));
+          const { ajuste, documento } = resp;
+          if ((resp as any).historico_protocolo) {
+            setHistoricoProtocolo((resp as any).historico_protocolo);
+          }
 
           setEditalId(ajuste.edital_id || '');
           setAtaId(ajuste.ata_id || '');
+          if (ajuste.ata_id) {
+            setOrigemTipo('ata');
+          }
           setMunicipio(ajuste.municipio);
           setEntidade(ajuste.entidade);
+          setAdesaoParticipacao(Boolean(documento.descritor?.adesaoParticipacao));
+          setGerenciadoraJurisdicionada(Boolean(documento.descritor?.gerenciadoraJurisdicionada));
+          setCnpjGerenciadora(documento.descritor?.cnpjGerenciadora || '');
+          setMunicipioGerenciador(documento.descritor?.municipioGerenciador || '');
+          setEntidadeGerenciadora(documento.descritor?.entidadeGerenciadora || '');
           setCodigoEdital(ajuste.codigo_edital);
           setCodigoAta(ajuste.codigo_ata || '');
           setCodigoContrato(ajuste.codigo_contrato);
@@ -159,6 +210,8 @@ export const AjusteForm: React.FC = () => {
           setCategoriaProcessoId(ajuste.categoria_processo_id);
           setTipoObjetoContrato(ajuste.tipo_objeto_contrato);
           setReceita(ajuste.receita);
+          setCodigoUnidade(documento.codigoUnidade || '');
+          setDespesas(Array.isArray(documento.despesas) ? documento.despesas.map((d: any) => String(d)) : []);
 
           setTipoPessoaFornecedor((ajuste.tipo_pessoa_fornecedor as any) || 'PJ');
           setNiFornecedor(ajuste.ni_fornecedor);
@@ -175,6 +228,7 @@ export const AjusteForm: React.FC = () => {
           setInformacaoComplementar(documento.informacaoComplementar || '');
           setValorInicial(ajuste.valor_inicial);
           setValorGlobal(ajuste.valor_global);
+          setValorAcumulado(documento.valorAcumulado !== undefined && documento.valorAcumulado !== null ? Number(documento.valorAcumulado) : '');
           setNumeroParcelas(documento.numeroParcelas || 1);
           setValorParcela(documento.valorParcela || 0);
 
@@ -193,6 +247,8 @@ export const AjusteForm: React.FC = () => {
           if (ajuste.edital_id) {
             const ed = await editalService.getEdital(ajuste.edital_id);
             setSelectedEdital(ed);
+            const ref = await licitacaoService.getReferenciaEdital(ajuste.edital_id).catch(() => null);
+            setReferenciaEdital(ref);
           }
         } catch {
           toast.error('Erro ao carregar dados do Ajuste/Contrato.');
@@ -214,6 +270,7 @@ export const AjusteForm: React.FC = () => {
     setEditalId(eId);
     if (!eId) {
       setSelectedEdital(null);
+      setReferenciaEdital(null);
       setAtaId('');
       setCodigoAta('');
       return;
@@ -228,7 +285,6 @@ export const AjusteForm: React.FC = () => {
       setProcesso(ed.numero_processo || '');
       setObjetoContrato(ed.objeto_compra || '');
 
-      // Se havia uma ata selecionada que não pertence a este edital, reseta
       if (ataId) {
         const ataAtual = atas.find((a) => a.id === Number(ataId));
         if (ataAtual && ataAtual.edital_id !== eId && ataAtual.codigo_edital !== ed.codigo_edital) {
@@ -237,9 +293,16 @@ export const AjusteForm: React.FC = () => {
         }
       }
 
-      const itens = (ed as any).parsed_documento?.itensCompra || (ed as any).documento?.itensCompra;
-      if (itens && Array.isArray(itens)) {
-        setSelectedItens(itens.map((it: any) => it.numeroItem));
+      const ref = await licitacaoService.getReferenciaEdital(eId).catch(() => null);
+      setReferenciaEdital(ref);
+
+      if (ref && ref.situacao_licitacao === 'enviada' && ref.itens_homologados.length > 0) {
+        setSelectedItens(ref.itens_homologados);
+      } else {
+        const itens = (ed as any).parsed_documento?.itensCompra || (ed as any).documento?.itensCompra;
+        if (itens && Array.isArray(itens)) {
+          setSelectedItens(itens.map((it: any) => it.numeroItem));
+        }
       }
     } catch {
       toast.error('Erro ao carregar dados do edital selecionado.');
@@ -264,6 +327,8 @@ export const AjusteForm: React.FC = () => {
         setEditalId(ata.edital_id);
         const ed = await editalService.getEdital(ata.edital_id);
         setSelectedEdital(ed);
+        const ref = await licitacaoService.getReferenciaEdital(ata.edital_id).catch(() => null);
+        setReferenciaEdital(ref);
       }
       if (documento.numeroItem && Array.isArray(documento.numeroItem)) {
         setSelectedItens(documento.numeroItem);
@@ -271,6 +336,47 @@ export const AjusteForm: React.FC = () => {
     } catch {
       toast.error('Erro ao vincular ata selecionada.');
     }
+  };
+
+  const aplicarFornecedorVencedor = (forn: FornecedorVencedorLicitacao) => {
+    setTipoPessoaFornecedor(forn.tipoPessoaFornecedor || 'PJ');
+    setNiFornecedor(forn.niFornecedor);
+    if (forn.nomeRazaoSocial) {
+      setNomeRazaoSocialFornecedor(forn.nomeRazaoSocial);
+    }
+    if (forn.itensVencidos?.length) {
+      setSelectedItens([...forn.itensVencidos].sort((a, b) => a - b));
+    }
+    if (forn.valorSugerido !== null && forn.valorSugerido !== undefined && forn.valorSugerido > 0) {
+      setValorInicial(forn.valorSugerido);
+      setValorGlobal(forn.valorSugerido);
+      const nParc = numeroParcelas || 1;
+      setValorParcela(Number((forn.valorSugerido / nParc).toFixed(4)));
+    }
+    setShowFornecedorModal(false);
+    toast.success(`Fornecedor ${forn.niFornecedor} e ${forn.itensVencidos.length} item(ns) aplicados ao ajuste!`);
+  };
+
+  const handlePreencherPelaLicitacao = () => {
+    if (!referenciaEdital || referenciaEdital.situacao_licitacao !== 'enviada') {
+      toast.error('Não há licitação enviada para o edital selecionado.');
+      return;
+    }
+    const vencedores = referenciaEdital.fornecedores_vencedores || [];
+    if (vencedores.length === 0) {
+      if (referenciaEdital.itens_homologados.length > 0) {
+        setSelectedItens([...referenciaEdital.itens_homologados].sort((a, b) => a - b));
+        toast.success(`${referenciaEdital.itens_homologados.length} item(ns) homologado(s) selecionado(s).`);
+      } else {
+        toast.error('A licitação enviada não possui fornecedores vencedores nem itens homologados.');
+      }
+      return;
+    }
+    if (vencedores.length === 1) {
+      aplicarFornecedorVencedor(vencedores[0]);
+      return;
+    }
+    setShowFornecedorModal(true);
   };
 
   const toggleItem = (numItem: number) => {
@@ -301,12 +407,38 @@ export const AjusteForm: React.FC = () => {
       return;
     }
 
-    // Validação SRP: se edital é SRP e não é adesão, a ata vinculada é obrigatória
+    // Validação AUDESP (TCE-SP): se o edital é SRP e não é adesão externa, o código da Ata é obrigatório
     const editalDoc = selectedEdital?.parsed_documento || selectedEdital?.documento;
     const isSrp = Boolean(editalDoc?.srp);
-    if (!adesaoParticipacao && isSrp && !codigoAta) {
+    if (!adesaoParticipacao && isSrp && !codigoAta.trim()) {
       toast.error('O Edital selecionado é do tipo SRP (Sistema de Registro de Preços): informe ou selecione a Ata vinculada.');
       return;
+    }
+    if (adesaoParticipacao) {
+      const digitsEdital = stripMask(codigoEdital);
+      if (digitsEdital.length !== 25) {
+        toast.error('Na adesão ou participação, informe o ID de Contratação PNCP do edital com 25 dígitos.');
+        return;
+      }
+      if (codigoAta.trim()) {
+        const digitsAta = stripMask(codigoAta);
+        if (digitsAta.length !== 31) {
+          toast.error('Na adesão, informe o ID da Ata PNCP com 31 dígitos ou deixe o campo vazio.');
+          return;
+        }
+      }
+      if (gerenciadoraJurisdicionada) {
+        if (!municipioGerenciador || !entidadeGerenciadora) {
+          toast.error('Na adesão a entidade jurisdicionada ao TCE-SP, informe o Município e a Entidade Gerenciadora.');
+          return;
+        }
+      } else {
+        const cnpjGer = stripMask(cnpjGerenciadora);
+        if (cnpjGer.length !== 14) {
+          toast.error('Na adesão a entidade não jurisdicionada ao TCE-SP, informe o CNPJ da Entidade Gerenciadora com 14 dígitos.');
+          return;
+        }
+      }
     }
 
     // Código do contrato: até 25 caracteres (se sem PNCP, validação flexível de tamanho local)
@@ -343,22 +475,39 @@ export const AjusteForm: React.FC = () => {
       toast.error('Selecione ao menos um item contratado.');
       return;
     }
+    if (tipoContratoId === 7 && despesas.length > 1) {
+      toast.error('Para Empenho (tipoContratoId = 7), informe no máximo 1 classificação de despesa.');
+      return;
+    }
 
     const descritor: any = {
       municipio: Number(municipio),
       entidade: Number(entidade),
       adesaoParticipacao: Boolean(adesaoParticipacao),
-      codigoEdital: codigoEdital.trim(),
+      codigoEdital: adesaoParticipacao ? stripMask(codigoEdital) : codigoEdital.trim(),
       codigoContrato: codContratoFinal.trim(),
       retificacao: Boolean(retificacao)
     };
-    if (codigoAta) {
-      descritor.codigoAta = codigoAta.trim();
+    if (adesaoParticipacao) {
+      descritor.gerenciadoraJurisdicionada = Boolean(gerenciadoraJurisdicionada);
+      if (gerenciadoraJurisdicionada) {
+        if (municipioGerenciador) descritor.municipioGerenciador = Number(municipioGerenciador);
+        if (entidadeGerenciadora) descritor.entidadeGerenciadora = Number(entidadeGerenciadora);
+      } else {
+        const cnpjGer = stripMask(cnpjGerenciadora);
+        if (cnpjGer) descritor.cnpjGerenciadora = cnpjGer;
+      }
     }
+    if (codigoAta.trim()) {
+      descritor.codigoAta = adesaoParticipacao ? stripMask(codigoAta) : codigoAta.trim();
+    }
+
+    const niFornecedorNormalizado =
+      tipoPessoaFornecedor === 'PE' ? niFornecedor.trim() : stripMask(niFornecedor);
 
     const documentoJSON: any = {
       descritor,
-      fonteRecursosContratacao: fontesRecursos,
+      ...(fontesRecursos.length > 0 ? { fonteRecursosContratacao: [...fontesRecursos].sort((a, b) => a - b) } : {}),
       itens: selectedItens,
       tipoContratoId: Number(tipoContratoId),
       numeroContratoEmpenho: numeroContratoEmpenho.trim(),
@@ -366,12 +515,15 @@ export const AjusteForm: React.FC = () => {
       processo: processo.trim(),
       categoriaProcessoId: Number(categoriaProcessoId),
       receita: Boolean(receita),
-      niFornecedor: niFornecedor.trim(),
+      ...(despesas.length > 0 ? { despesas } : {}),
+      ...(codigoUnidade.trim() ? { codigoUnidade: codigoUnidade.trim() } : {}),
+      niFornecedor: niFornecedorNormalizado,
       tipoPessoaFornecedor,
       nomeRazaoSocialFornecedor: nomeRazaoSocialFornecedor.trim(),
       objetoContrato: objetoContrato.trim(),
       valorInicial: Number(valorInicial),
       valorGlobal: valorGlobal ? Number(valorGlobal) : Number(valorInicial),
+      ...(valorAcumulado !== '' && valorAcumulado !== undefined ? { valorAcumulado: Number(valorAcumulado) } : {}),
       dataAssinatura,
       tipoObjetoContrato: Number(tipoObjetoContrato)
     };
@@ -411,13 +563,32 @@ export const AjusteForm: React.FC = () => {
       toast.success(isEditing ? 'Ajuste/Contrato atualizado com sucesso!' : 'Ajuste/Contrato criado com sucesso!');
 
       if (transmitirAposSalvar) {
+        if (!adesaoParticipacao && selectedEdital) {
+          if (selectedEdital.status !== 'sent') {
+            toast.error('O edital ainda não foi enviado ao AUDESP.');
+            if (!isEditing) navigate(`/ajustes/${resAjuste.id}`);
+            return;
+          }
+          if (referenciaEdital && referenciaEdital.situacao_licitacao !== 'enviada') {
+            toast.error(
+              referenciaEdital.situacao_licitacao === 'inexistente'
+                ? 'O edital ainda não tem licitação.'
+                : 'A licitação do edital ainda não foi enviada ao AUDESP.'
+            );
+            if (!isEditing) navigate(`/ajustes/${resAjuste.id}`);
+            return;
+          }
+        }
         setSending(true);
         toast.loading('Transmitindo para o AUDESP...', { id: 'transmissao' });
         const resEnvio = await ajusteService.enviarAjuste(resAjuste.id);
         toast.dismiss('transmissao');
         setSending(false);
         if (resEnvio.sucesso) {
-          toast.success(`Contrato transmitido! Protocolo: ${resEnvio.protocolo}`);
+          notificarResultadoProtocolo(resEnvio, {
+            prefixoSucesso: 'Contrato transmitido com sucesso!',
+            isTransmissao: true,
+          });
           navigate('/ajustes');
         } else {
           toast.error(resEnvio.mensagem || 'Falha na transmissão do contrato.');
@@ -429,8 +600,12 @@ export const AjusteForm: React.FC = () => {
         }
       }
     } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Erro ao salvar ajuste.';
-      toast.error(msg);
+      const detail = err.response?.data?.detail;
+      if (detail && typeof detail === 'object' && detail.erros?.length) {
+        toast.error(detail.erros.join(' | '));
+      } else {
+        toast.error(detail?.mensagem || detail || 'Erro ao salvar/enviar ajuste.');
+      }
     } finally {
       setSaving(false);
       setSending(false);
@@ -444,8 +619,11 @@ export const AjusteForm: React.FC = () => {
       const res = await ajusteService.consultarProtocolo(Number(id));
       if (res.sucesso) {
         setStatusProtocolo(res.status);
-        setDetalhesProtocolo(res.detalhes);
-        toast.success(`Status atualizado: ${res.status}`);
+        setDetalhesProtocolo(res.detalhes || res.dados);
+        if (res.historico) {
+          setHistoricoProtocolo(res.historico);
+        }
+        notificarResultadoProtocolo(res, { isTransmissao: false });
       } else {
         toast.error(res.mensagem || 'Erro ao consultar protocolo.');
       }
@@ -484,6 +662,38 @@ export const AjusteForm: React.FC = () => {
 
   const isSent = ajusteStatus === 'sent';
   const itensEdital = selectedEdital?.parsed_documento?.itensCompra || selectedEdital?.documento?.itensCompra;
+  const isEditalSrp = (ed: any) => {
+    if (!ed) return false;
+    if (ed.parsed_documento) return Boolean(ed.parsed_documento.srp);
+    if (ed.documento_json) {
+      try {
+        const parsed = typeof ed.documento_json === 'string' ? JSON.parse(ed.documento_json) : ed.documento_json;
+        return Boolean(parsed?.srp);
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  };
+  const editaisParaAjuste = editais.filter(
+    (ed) => ed.status === 'sent' || ed.id === Number(editalId)
+  );
+  const selectedEditalSrp = selectedEdital ? isEditalSrp(selectedEdital) : false;
+  const ataSelecionada = atas.find((a) => a.id === Number(ataId));
+  const avisoBloqueioEnvioAjuste = !adesaoParticipacao
+    ? selectedEdital && selectedEdital.status !== 'sent'
+      ? 'O edital selecionado ainda está em rascunho. Você pode salvar o rascunho do ajuste, mas o envio ao AUDESP exige que o edital seja enviado primeiro.'
+      : selectedEdital && referenciaEdital?.situacao_licitacao === 'inexistente'
+      ? 'O edital selecionado ainda não tem licitação cadastrada. O envio do ajuste ao AUDESP exige uma licitação enviada.'
+      : selectedEdital && referenciaEdital?.situacao_licitacao === 'rascunho'
+      ? 'A licitação do edital ainda está em rascunho. Envie a licitação ao AUDESP antes de transmitir o ajuste.'
+      : selectedEditalSrp && !codigoAta.trim()
+      ? 'O edital selecionado é SRP (Registro de Preços): vincule ou informe o Código da Ata de Registro de Preços para enviar o ajuste.'
+      : ataSelecionada && ataSelecionada.status !== 'sent'
+      ? 'A Ata de Registro de Preços selecionada ainda está em rascunho. Envie a ata ao AUDESP antes de transmitir o ajuste.'
+      : null
+    : null;
+  const objetosPermitidos = dominios?.objetosPorCategoria?.[categoriaProcessoId] || [];
 
   return (
     <Container fluid className="p-0 pb-5">
@@ -501,38 +711,73 @@ export const AjusteForm: React.FC = () => {
 
       {/* Protocol Banner if Sent */}
       {isSent && (
-        <div className={`alert ${statusProtocolo?.toLowerCase().includes('rejeitado') ? 'alert-danger' : 'alert-success'} d-flex justify-content-between align-items-center shadow-sm mb-4`}>
-          <div>
-            <h5 className="alert-heading mb-1 d-flex align-items-center gap-2">
-              <CheckCircle2 size={20} /> Protocolo AUDESP: <strong>{protocolo}</strong>
-            </h5>
-            <p className="mb-0 small">
-              Situação no Tribunal de Contas: <strong>{statusProtocolo || 'Recebido'}</strong>
-            </p>
-            {detalhesProtocolo?.erros?.length > 0 && (
-              <div className="mt-2 pt-2 border-top border-danger-subtle small">
-                <strong>Erros / Notificações do TCESP:</strong>
-                <ul className="mb-0 ps-3 mt-1">
-                  {detalhesProtocolo.erros.map((err: any, idx: number) => (
-                    <li key={idx}>{err.mensagem || err.campo || JSON.stringify(err)}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
+        <div className={`alert ${statusProtocolo?.toLowerCase().includes('rejeitado') ? 'alert-danger' : 'alert-success'} shadow-sm mb-4`}>
+          <div className="d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+              <h5 className="alert-heading mb-1 d-flex align-items-center gap-2">
+                <CheckCircle2 size={20} /> Protocolo AUDESP: <strong>{protocolo}</strong>
+              </h5>
+              <p className="mb-0 small">
+                Situação no Tribunal de Contas: <strong>{statusProtocolo || 'Recebido'}</strong>
+              </p>
+            </div>
+            <div className="d-flex align-items-center gap-2">
+              <button
+                type="button"
+                onClick={handleConsultarProtocolo}
+                disabled={sending}
+                className="btn btn-sm btn-light border d-flex align-items-center gap-1"
+              >
+                <RefreshCw size={14} className={sending ? 'spin' : ''} /> Consultar Protocolo
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowHistoricoModal(true)}
+                className="btn btn-sm btn-light border d-flex align-items-center gap-1"
+              >
+                <History size={14} /> Histórico ({historicoProtocolo.length})
+              </button>
+              <span className="badge bg-white text-dark fs-6 px-3 py-2 border">
+                Fase IV — TCESP
+              </span>
+            </div>
           </div>
-          <span className="badge bg-white text-dark fs-6 px-3 py-2 border">
-            Fase IV — TCESP
-          </span>
+
+          <ProtocoloErrosAlert
+            detalhesProtocolo={detalhesProtocolo}
+            statusProtocolo={statusProtocolo}
+            className="mt-3"
+          />
         </div>
       )}
 
+      <HistoricoProtocoloModal
+        show={showHistoricoModal}
+        onHide={() => setShowHistoricoModal(false)}
+        protocolo={protocolo}
+        codigoDocumento={codigoContrato || `${numeroContratoEmpenho}/${anoContrato}`}
+        historico={historicoProtocolo}
+      />
+
       <Row className="g-4">
-        {/* Coluna 1: Origem e Dados Contratuais */}
-        <Col lg={7}>
+        {/* Seções em 100% de largura empilhadas verticalmente */}
+        <Col xs={12}>
           {/* Card 1: Origem e Descritor */}
           <CardBox title="1. Descritor e Origem da Contratação">
             <Form.Group className="mb-3">
-              <Form.Label className="fw-bold">Tipo de Origem da Contratação:</Form.Label>
+              <div className="d-flex justify-content-between align-items-center mb-1">
+                <Form.Label className="fw-bold mb-0">Tipo de Origem da Contratação:</Form.Label>
+                {!isSent && !adesaoParticipacao && referenciaEdital?.situacao_licitacao === 'enviada' && (
+                  <Button
+                    size="sm"
+                    variant="outline-success"
+                    onClick={handlePreencherPelaLicitacao}
+                    className="d-flex align-items-center gap-1 py-0 px-2"
+                  >
+                    <Download size={14} /> Preencher pela licitação
+                  </Button>
+                )}
+              </div>
               <div className="d-flex gap-3">
                 <Form.Check
                   type="radio"
@@ -541,6 +786,7 @@ export const AjusteForm: React.FC = () => {
                   label="Licitação / Edital Direto"
                   checked={origemTipo === 'edital'}
                   onChange={() => setOrigemTipo('edital')}
+                  disabled={isSent}
                 />
                 <Form.Check
                   type="radio"
@@ -549,6 +795,7 @@ export const AjusteForm: React.FC = () => {
                   label="Ata de Registro de Preços (ARP)"
                   checked={origemTipo === 'ata'}
                   onChange={() => setOrigemTipo('ata')}
+                  disabled={isSent}
                 />
               </div>
             </Form.Group>
@@ -564,9 +811,9 @@ export const AjusteForm: React.FC = () => {
               <Form.Group className="mb-3">
                 <Form.Label className="fw-bold">
                   Vincular Edital Local {adesaoParticipacao ? '(Opcional na Adesão)' : ''}:
-                  {selectedEdital?.parsed_documento?.srp || selectedEdital?.documento?.srp ? (
+                  {selectedEditalSrp && (
                     <span className="badge bg-info ms-2">SRP (Exige Ata)</span>
-                  ) : null}
+                  )}
                   {selectedEdital?.sem_pncp ? (
                     <span className="badge bg-secondary ms-2">Sem PNCP</span>
                   ) : null}
@@ -574,11 +821,14 @@ export const AjusteForm: React.FC = () => {
                 <Form.Select
                   value={editalId}
                   onChange={(e) => handleSelectEdital(Number(e.target.value))}
+                  disabled={isSent}
                 >
                   <option value="">{adesaoParticipacao ? '-- Nenhum (Adesão Externa) --' : '-- Selecione o edital de origem --'}</option>
-                  {editais.map((ed) => (
+                  {editaisParaAjuste.map((ed) => (
                     <option key={ed.id} value={ed.id}>
                       {ed.codigo_edital} - {ed.numero_compra}/{ed.ano_compra} {ed.sem_pncp ? '(Sem PNCP)' : ''}
+                      {ed.status !== 'sent' ? ' [Rascunho]' : ''}
+                      {isEditalSrp(ed) ? ' [SRP]' : ''}
                     </option>
                   ))}
                 </Form.Select>
@@ -589,11 +839,13 @@ export const AjusteForm: React.FC = () => {
                 <Form.Select
                   value={ataId}
                   onChange={(e) => handleSelectAta(Number(e.target.value))}
+                  disabled={isSent}
                 >
                   <option value="">-- Selecione a ata de origem --</option>
                   {atasDisponiveis.map((at) => (
                     <option key={at.id} value={at.id}>
                       {at.numero_ata_registro_preco}/{at.ano_ata} ({at.codigo_ata}) - Edital: {at.codigo_edital}
+                      {at.status !== 'sent' ? ' [Rascunho]' : ''}
                     </option>
                   ))}
                 </Form.Select>
@@ -605,15 +857,25 @@ export const AjusteForm: React.FC = () => {
               </Form.Group>
             )}
 
+            {avisoBloqueioEnvioAjuste && (
+              <div className="alert alert-warning py-2 px-3 mb-3 small d-flex align-items-center gap-2">
+                <AlertCircle size={16} />
+                <span>{avisoBloqueioEnvioAjuste}</span>
+              </div>
+            )}
+
             <Row className="g-3">
               <Col md={6}>
                 <Form.Group>
-                  <Form.Label className="fw-bold">Código do Edital: *</Form.Label>
+                  <Form.Label className="fw-bold">
+                    {adesaoParticipacao ? 'ID Contratação PNCP do Edital (25 dígitos): *' : 'Código do Edital: *'}
+                  </Form.Label>
                   <Form.Control
                     type="text"
                     value={codigoEdital}
                     onChange={(e) => setCodigoEdital(e.target.value)}
-                    placeholder="Ex: PREG-01/2026"
+                    placeholder={adesaoParticipacao ? '25 dígitos numéricos PNCP' : 'Ex: PREG-01/2026'}
+                    disabled={isSent}
                     required
                   />
                 </Form.Group>
@@ -628,6 +890,7 @@ export const AjusteForm: React.FC = () => {
                     value={codigoContrato}
                     onChange={(e) => setCodigoContrato(e.target.value)}
                     placeholder="Ex: CONTR-05/2026 (gerado auto se vazio)"
+                    disabled={isSent}
                   />
                 </Form.Group>
               </Col>
@@ -639,20 +902,27 @@ export const AjusteForm: React.FC = () => {
                 onEntidadeChange={setEntidade}
                 municipiosList={dominios?.municipios}
                 entidadesList={dominios?.entidades}
-                disabled={retificacao}
+                disabled={isSent || retificacao}
                 municipioColMd={4}
                 entidadeColMd={4}
               />
 
               <Col md={4}>
                 <Form.Group>
-                  <Form.Label>Código da Ata (se houver):</Form.Label>
+                  <Form.Label>
+                    {adesaoParticipacao
+                      ? 'ID da Ata PNCP (31 dígitos, opcional):'
+                      : selectedEditalSrp || origemTipo === 'ata'
+                      ? 'Código da Ata (codigoAta): *'
+                      : 'Código da Ata (se houver):'}
+                  </Form.Label>
                   <Form.Control
                     type="text"
                     className="font-monospace"
                     value={codigoAta}
                     onChange={(e) => setCodigoAta(e.target.value)}
-                    placeholder="Ex: ATA-10/2026"
+                    placeholder={adesaoParticipacao ? '31 dígitos numéricos PNCP' : 'Ex: ATA-10/2026'}
+                    disabled={isSent}
                   />
                 </Form.Group>
               </Col>
@@ -664,6 +934,7 @@ export const AjusteForm: React.FC = () => {
                   label="Adesão / Participação (carona em outro órgão)"
                   checked={adesaoParticipacao}
                   onChange={(e) => setAdesaoParticipacao(e.target.checked)}
+                  disabled={isSent}
                   className="fw-medium mt-2"
                 />
               </Col>
@@ -675,9 +946,74 @@ export const AjusteForm: React.FC = () => {
                   label="Esta remessa é uma Retificação de Ajuste"
                   checked={retificacao}
                   onChange={(e) => setRetificacao(e.target.checked)}
+                  disabled={isSent}
                   className="fw-medium mt-2"
                 />
               </Col>
+
+              {adesaoParticipacao && (
+                <Col md={12}>
+                  <div className="p-3 bg-light rounded border mt-1">
+                    <Form.Check
+                      type="switch"
+                      id="chkGerenciadoraJurisdicionada"
+                      label="A Entidade Gerenciadora da licitação é jurisdicionada ao TCE-SP?"
+                      checked={gerenciadoraJurisdicionada}
+                      onChange={(e) => setGerenciadoraJurisdicionada(e.target.checked)}
+                      disabled={isSent}
+                      className="fw-bold mb-2 text-dark"
+                    />
+                    {gerenciadoraJurisdicionada ? (
+                      <Row className="g-2">
+                        <Col md={6}>
+                          <Form.Group>
+                            <Form.Label className="small fw-bold">Código Município Gerenciador (AUDESP): *</Form.Label>
+                            <Form.Control
+                              size="sm"
+                              type="number"
+                              min={1}
+                              max={9999}
+                              placeholder="Ex: 7071"
+                              value={municipioGerenciador}
+                              onChange={(e) => setMunicipioGerenciador(e.target.value ? Number(e.target.value) : '')}
+                              disabled={isSent}
+                            />
+                          </Form.Group>
+                        </Col>
+                        <Col md={6}>
+                          <Form.Group>
+                            <Form.Label className="small fw-bold">Código Entidade Gerenciadora (AUDESP): *</Form.Label>
+                            <Form.Control
+                              size="sm"
+                              type="number"
+                              min={1}
+                              max={99999}
+                              placeholder="Ex: 1"
+                              value={entidadeGerenciadora}
+                              onChange={(e) => setEntidadeGerenciadora(e.target.value ? Number(e.target.value) : '')}
+                              disabled={isSent}
+                            />
+                          </Form.Group>
+                        </Col>
+                      </Row>
+                    ) : (
+                      <Form.Group>
+                        <Form.Label className="small fw-bold">CNPJ da Entidade Gerenciadora (14 dígitos): *</Form.Label>
+                        <Form.Control
+                          size="sm"
+                          type="text"
+                          className="font-monospace"
+                          maxLength={18}
+                          placeholder="Informe o CNPJ de 14 dígitos da gerenciadora"
+                          value={cnpjGerenciadora}
+                          onChange={(e) => setCnpjGerenciadora(e.target.value)}
+                          disabled={isSent}
+                        />
+                      </Form.Group>
+                    )}
+                  </div>
+                </Col>
+              )}
             </Row>
           </CardBox>
 
@@ -757,10 +1093,14 @@ export const AjusteForm: React.FC = () => {
                     <Form.Select
                       value={tipoObjetoContrato}
                       onChange={(e) => setTipoObjetoContrato(Number(e.target.value))}
+                      disabled={isSent}
                     >
-                      {dominios?.tiposObjetoContrato && Object.entries(dominios.tiposObjetoContrato).map(([k, v]) => (
-                        <option key={k} value={k}>{v}</option>
-                      ))}
+                      {dominios?.tiposObjetoContrato &&
+                        Object.entries(dominios.tiposObjetoContrato)
+                          .filter(([k]) => objetosPermitidos.length === 0 || objetosPermitidos.includes(Number(k)))
+                          .map(([k, v]) => (
+                            <option key={k} value={k}>{v}</option>
+                          ))}
                     </Form.Select>
                   </Form.Group>
                 </Col>
@@ -805,6 +1145,115 @@ export const AjusteForm: React.FC = () => {
                       maxLength={5120}
                     />
                   </Form.Group>
+                </Col>
+
+                <Col md={4}>
+                  <Form.Group>
+                    <Form.Label className="small fw-bold">Código de Unidade Compradora (PNCP):</Form.Label>
+                    <Form.Control
+                      size="sm"
+                      type="text"
+                      maxLength={30}
+                      placeholder="Opcional (até 30 caracteres)"
+                      value={codigoUnidade}
+                      onChange={(e) => setCodigoUnidade(e.target.value)}
+                      disabled={isSent}
+                    />
+                  </Form.Group>
+                </Col>
+
+                <Col md={8}>
+                  <Form.Group>
+                    <Form.Label className="small fw-bold">
+                      Classificações de Despesa (8 dígitos, ex: 33903000):
+                    </Form.Label>
+                    <div className="d-flex gap-2">
+                      <Form.Control
+                        size="sm"
+                        type="text"
+                        className="font-monospace"
+                        maxLength={8}
+                        placeholder="Digite 8 caracteres e clique em +"
+                        value={novaDespesa}
+                        onChange={(e) => setNovaDespesa(e.target.value.trim())}
+                        disabled={isSent}
+                      />
+                      {!isSent && (
+                        <Button
+                          size="sm"
+                          variant="outline-success"
+                          type="button"
+                          onClick={() => {
+                            const val = novaDespesa.trim();
+                            if (val.length !== 8) {
+                              toast.error('A classificação de despesa deve ter exatamente 8 caracteres (ex: 33903000).');
+                              return;
+                            }
+                            if (tipoContratoId === 7 && despesas.length >= 1) {
+                              toast.error('Para Empenho (tipo 7), é permitida apenas 1 classificação de despesa.');
+                              return;
+                            }
+                            if (!despesas.includes(val)) {
+                              setDespesas([...despesas, val]);
+                            }
+                            setNovaDespesa('');
+                          }}
+                        >
+                          <Plus size={14} /> Adicionar
+                        </Button>
+                      )}
+                    </div>
+                    {despesas.length > 0 && (
+                      <div className="d-flex flex-wrap gap-1 mt-2">
+                        {despesas.map((d, idx) => (
+                          <Badge key={idx} bg="secondary" className="d-inline-flex align-items-center gap-1 font-monospace py-1 px-2">
+                            {d}
+                            {!isSent && (
+                              <Trash2
+                                size={12}
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => setDespesas(despesas.filter((_, i) => i !== idx))}
+                              />
+                            )}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </Form.Group>
+                </Col>
+
+                {/* Fontes de Recursos da Contratação */}
+                <Col md={12}>
+                  <div className="p-3 bg-light rounded border mt-1">
+                    <span className="small fw-bold text-secondary d-block mb-1">
+                      Fontes de Recursos da Contratação:
+                    </span>
+                    <div className="row g-2">
+                      {dominios?.fontesRecurso &&
+                        Object.entries(dominios.fontesRecurso).map(([cStr, desc]) => {
+                          const cNum = Number(cStr);
+                          const isChecked = fontesRecursos.includes(cNum);
+                          return (
+                            <div key={cStr} className="col-md-6">
+                              <Form.Check
+                                type="checkbox"
+                                id={`ajuste_fr_${cStr}`}
+                                label={<span className="small">{desc}</span>}
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setFontesRecursos([...fontesRecursos, cNum]);
+                                  } else {
+                                    setFontesRecursos(fontesRecursos.filter((f) => f !== cNum));
+                                  }
+                                }}
+                                disabled={isSent}
+                              />
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
                 </Col>
               </Row>
             </CardBox>
@@ -910,12 +1359,12 @@ export const AjusteForm: React.FC = () => {
           </div>
         </Col>
 
-        {/* Coluna 2: Valores, Vigência e Itens Contratados */}
-        <Col lg={5}>
+        {/* Seções 4 e 5: Valores, Vigência e Itens Contratados */}
+        <Col xs={12}>
           {/* Card 4: Valores e Vigência */}
           <CardBox title="4. Valores e Prazos de Vigência">
             <Row className="g-3">
-              <Col md={6}>
+              <Col md={4}>
                 <Form.Group>
                   <Form.Label className="fw-bold">Valor Inicial (R$): *</Form.Label>
                   <Form.Control
@@ -932,7 +1381,7 @@ export const AjusteForm: React.FC = () => {
                 </Form.Group>
               </Col>
 
-              <Col md={6}>
+              <Col md={4}>
                 <Form.Group>
                   <Form.Label className="fw-bold">Valor Global (R$):</Form.Label>
                   <Form.Control
@@ -940,6 +1389,19 @@ export const AjusteForm: React.FC = () => {
                     step="0.0001"
                     value={valorGlobal}
                     onChange={(e) => setValorGlobal(parseFloat(e.target.value) || 0)}
+                  />
+                </Form.Group>
+              </Col>
+
+              <Col md={4}>
+                <Form.Group>
+                  <Form.Label className="fw-bold">Valor Acumulado (R$):</Form.Label>
+                  <Form.Control
+                    type="number"
+                    step="0.0001"
+                    placeholder="Opcional"
+                    value={valorAcumulado}
+                    onChange={(e) => setValorAcumulado(e.target.value !== '' ? parseFloat(e.target.value) : '')}
                   />
                 </Form.Group>
               </Col>
@@ -1173,6 +1635,60 @@ export const AjusteForm: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Modal: Selecionar Fornecedor Vencedor da Licitação */}
+      {showFornecedorModal && referenciaEdital && (
+        <div className="modal show d-block" tabIndex={-1} style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title fs-6 fw-bold">Preencher Ajuste pela Licitação Enviada</h5>
+                <button type="button" className="btn-close" onClick={() => setShowFornecedorModal(false)}></button>
+              </div>
+              <div className="modal-body">
+                <p className="small text-muted mb-3">
+                  Selecione o fornecedor vencedor da licitação para preencher automaticamente os dados do contratado, itens vencidos e valor sugerido:
+                </p>
+                <div className="list-group">
+                  {referenciaEdital.fornecedores_vencedores.map((forn, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      className="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+                      onClick={() => aplicarFornecedorVencedor(forn)}
+                    >
+                      <div>
+                        <div className="fw-bold font-monospace">
+                          {forn.niFornecedor} ({forn.tipoPessoaFornecedor})
+                        </div>
+                        {forn.nomeRazaoSocial && (
+                          <div className="small text-dark">{forn.nomeRazaoSocial}</div>
+                        )}
+                        <div className="small text-muted">
+                          Itens vencidos: {forn.itensVencidos.join(', ')}
+                        </div>
+                      </div>
+                      <div className="text-end">
+                        <Badge bg="success">{forn.itensVencidos.length} item(ns)</Badge>
+                        {forn.valorSugerido !== null && forn.valorSugerido !== undefined && (
+                          <div className="small fw-bold text-success font-monospace mt-1">
+                            {formatBRL(forn.valorSugerido)}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="modal-footer">
+                <Button variant="secondary" size="sm" onClick={() => setShowFornecedorModal(false)}>
+                  Cancelar
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </Container>
   );
 };

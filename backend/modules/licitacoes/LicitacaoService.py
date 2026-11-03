@@ -5,10 +5,21 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 from sqlmodel import Session, select, or_
 
-from core.audesp_client import enviar_licitacao_audesp, consultar_protocolo_audesp
+from core.audesp_client import (
+    enviar_licitacao_audesp,
+    consultar_protocolo_audesp,
+    extrair_erros_estruturados_audesp,
+    extrair_mensagens_protocolo_audesp,
+)
+from modules.protocolos.ProtocoloService import (
+    consultar_e_registrar_protocolo,
+    listar_historico_protocolo,
+)
 from core.audesp_domains import MUNICIPIOS_AUDESP, ENTIDADES_AUDESP
 from modules.licitacoes.Licitacao import Licitacao
 from modules.editais.Edital import Edital
+from modules.atas.Ata import AtaRegistroPreco
+from modules.ajustes.Ajuste import AjusteContrato
 from modules.licitacoes.LicitacaoDomains import (
     DOMINIO_TRI_STATE,
     DOMINIO_TIPO_NATUREZA,
@@ -22,6 +33,9 @@ from modules.licitacoes.LicitacaoDomains import (
     DOMINIO_TIPO_PESSOA,
     DOMINIO_DECLARACAO_ME_EPP,
     DOMINIO_RESULTADO_HABILITACAO,
+    selecionar_licitacao_enviada,
+    extrair_numeros_itens_licitacao,
+    extrair_resultado_licitacao,
     validar_regras_negocio_licitacao
 )
 
@@ -53,12 +67,26 @@ class LicitacaoService:
     def listar_licitacoes(
         session: Session,
         status: Optional[str] = None,
-        search: Optional[str] = None
+        search: Optional[str] = None,
+        edital_id: Optional[int] = None
     ) -> List[Licitacao]:
         """Lista licitações cadastradas com filtros opcionais."""
         query = select(Licitacao).order_by(Licitacao.updated_at.desc())
         if status:
             query = query.where(Licitacao.status == status)
+        if edital_id is not None:
+            edital = session.get(Edital, edital_id)
+            if edital:
+                query = query.where(
+                    or_(
+                        Licitacao.edital_id == edital.id,
+                        (Licitacao.codigo_edital == edital.codigo_edital)
+                        & (Licitacao.municipio == edital.municipio)
+                        & (Licitacao.entidade == edital.entidade)
+                    )
+                )
+            else:
+                query = query.where(Licitacao.edital_id == edital_id)
         if search:
             term = f"%{search.strip()}%"
             query = query.where(
@@ -71,6 +99,57 @@ class LicitacaoService:
                 )
             )
         return list(session.exec(query).all())
+
+    @staticmethod
+    def obter_referencia_edital(session: Session, edital_id: int) -> Dict[str, Any]:
+        """
+        Retorna a situação da licitação vinculada ao edital, a lista de números de itens,
+        os itens homologados e os fornecedores vencedores para preenchimento de Ata e Ajuste.
+        """
+        edital = session.get(Edital, edital_id)
+        if not edital:
+            raise HTTPException(status_code=404, detail="Edital não encontrado")
+
+        edital_doc = {}
+        try:
+            edital_doc = json.loads(edital.documento_json)
+        except Exception:
+            pass
+
+        licitacoes = LicitacaoService.listar_licitacoes(session=session, edital_id=edital.id)
+        lic_enviada = selecionar_licitacao_enviada(licitacoes)
+
+        if lic_enviada:
+            situacao_licitacao = "enviada"
+        elif len(licitacoes) > 0:
+            situacao_licitacao = "rascunho"
+        else:
+            situacao_licitacao = "inexistente"
+
+        lic_doc = {}
+        if lic_enviada and lic_enviada.documento_json:
+            try:
+                lic_doc = json.loads(lic_enviada.documento_json)
+            except Exception:
+                lic_doc = {}
+
+        numeros_itens = extrair_numeros_itens_licitacao(lic_doc) if lic_enviada else None
+        resultado = extrair_resultado_licitacao(lic_doc, edital_doc) if lic_enviada else {
+            "itensHomologados": [],
+            "fornecedoresVencedores": []
+        }
+
+        return {
+            "edital_id": edital.id,
+            "edital_status": edital.status,
+            "edital_srp": bool(edital_doc.get("srp", False)),
+            "sem_pncp": bool(edital.sem_pncp),
+            "situacao_licitacao": situacao_licitacao,
+            "licitacao_enviada_id": lic_enviada.id if lic_enviada else None,
+            "numeros_itens_licitacao": sorted(list(numeros_itens)) if numeros_itens is not None else None,
+            "itens_homologados": resultado["itensHomologados"],
+            "fornecedores_vencedores": resultado["fornecedoresVencedores"]
+        }
 
     @staticmethod
     def obter_licitacao(session: Session, id: int) -> Dict[str, Any]:
@@ -92,10 +171,39 @@ class LicitacaoService:
             except Exception:
                 detalhes_prot = licitacao.detalhes_protocolo
 
+        # Conta atas e ajustes dependentes do edital vinculado
+        dependentes = {"atas": 0, "ajustes": 0}
+        if licitacao.edital_id:
+            atas = session.exec(
+                select(AtaRegistroPreco).where(
+                    or_(
+                        AtaRegistroPreco.edital_id == licitacao.edital_id,
+                        (AtaRegistroPreco.codigo_edital == licitacao.codigo_edital)
+                        & (AtaRegistroPreco.municipio == licitacao.municipio)
+                        & (AtaRegistroPreco.entidade == licitacao.entidade)
+                    )
+                )
+            ).all()
+            ajustes = session.exec(
+                select(AjusteContrato).where(
+                    or_(
+                        AjusteContrato.edital_id == licitacao.edital_id,
+                        (AjusteContrato.codigo_edital == licitacao.codigo_edital)
+                        & (AjusteContrato.municipio == licitacao.municipio)
+                        & (AjusteContrato.entidade == licitacao.entidade)
+                    )
+                )
+            ).all()
+            dependentes = {"atas": len(atas), "ajustes": len(ajustes)}
+
         return {
             **licitacao.model_dump(),
             "parsed_documento": doc_json,
-            "parsed_detalhes_protocolo": detalhes_prot
+            "parsed_detalhes_protocolo": detalhes_prot,
+            "erros_formatados": extrair_mensagens_protocolo_audesp(detalhes_prot),
+            "erros_detalhados": extrair_erros_estruturados_audesp(detalhes_prot),
+            "historico_protocolo": listar_historico_protocolo(session, "licitacao", licitacao.id, licitacao.protocolo),
+            "dependentes": dependentes
         }
 
     @staticmethod
@@ -249,12 +357,25 @@ class LicitacaoService:
         # Executa validações oficiais AUDESP
         erros = validar_regras_negocio_licitacao(doc)
 
-        # Validação cruzada com o Edital de referência (se existir no banco)
+        # Validação cruzada com o Edital de referência (deve estar enviado)
+        edital_vinculado = None
         if licitacao.edital_id:
-            edital = session.get(Edital, licitacao.edital_id)
-            if edital and edital.documento_json:
+            edital_vinculado = session.get(Edital, licitacao.edital_id)
+        if not edital_vinculado and licitacao.codigo_edital:
+            edital_vinculado = session.exec(
+                select(Edital).where(
+                    Edital.codigo_edital == licitacao.codigo_edital,
+                    Edital.municipio == licitacao.municipio,
+                    Edital.entidade == licitacao.entidade
+                )
+            ).first()
+
+        if edital_vinculado:
+            if edital_vinculado.status != "sent":
+                erros.append("O edital ainda não foi enviado ao AUDESP.")
+            if edital_vinculado.documento_json:
                 try:
-                    edital_doc = json.loads(edital.documento_json)
+                    edital_doc = json.loads(edital_vinculado.documento_json)
                     itens_edital = edital_doc.get("itensCompra") or []
                     numeros_edital = {item["numeroItem"] for item in itens_edital if "numeroItem" in item}
                     numeros_licitacao = {item["numeroItem"] for item in doc.get("itens", []) if "numeroItem" in item}
@@ -292,11 +413,45 @@ class LicitacaoService:
             session.add(licitacao)
             session.commit()
             session.refresh(licitacao)
+
+            # Consulta automaticamente o protocolo logo após a transmissão
+            consulta_auto = None
+            if protocolo:
+                consulta_auto = consultar_e_registrar_protocolo(
+                    session=session,
+                    token=token,
+                    modulo="licitacao",
+                    registro_id=licitacao.id,
+                    codigo_documento=licitacao.codigo_edital,
+                    protocolo=protocolo,
+                    origem="envio_automatico",
+                    status_padrao="Recebido",
+                )
+                if consulta_auto.get("sucesso"):
+                    licitacao.status_protocolo = consulta_auto.get("status") or "Recebido"
+                    licitacao.detalhes_protocolo = json.dumps(consulta_auto.get("dados", {}), ensure_ascii=False)
+                    licitacao.updated_at = datetime.now(timezone.utc)
+                    session.add(licitacao)
+                    session.commit()
+                    session.refresh(licitacao)
+
+            erros_formatados = consulta_auto.get("erros_formatados", []) if consulta_auto else []
+            erros_detalhados = consulta_auto.get("erros_detalhados", []) if consulta_auto else []
+            is_rejeitado = bool(consulta_auto.get("is_rejeitado")) if consulta_auto else False
+            possui_erros = bool(consulta_auto.get("possui_erros")) if consulta_auto else False
+
             return {
                 "sucesso": True,
                 "mensagem": resultado["mensagem"],
                 "protocolo": protocolo,
-                "status_protocolo": "Recebido"
+                "status_protocolo": licitacao.status_protocolo or "Recebido",
+                "is_rejeitado": is_rejeitado,
+                "possui_erros": possui_erros,
+                "erros_formatados": erros_formatados,
+                "erros_detalhados": erros_detalhados,
+                "dados": consulta_auto.get("dados") if consulta_auto else resultado.get("dados"),
+                "detalhes": consulta_auto.get("dados") if consulta_auto else resultado.get("dados"),
+                "historico_protocolo": consulta_auto.get("historico", []) if consulta_auto else [],
             }
         else:
             licitacao.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
@@ -314,16 +469,25 @@ class LicitacaoService:
 
     @staticmethod
     async def consultar_protocolo(session: Session, id: int, token: str) -> Dict[str, Any]:
-        """Consulta no AUDESP a situação do protocolo da licitação."""
+        """Consulta no AUDESP a situação do protocolo da licitação e grava no histórico."""
         licitacao = session.get(Licitacao, id)
         if not licitacao or not licitacao.protocolo:
             raise HTTPException(status_code=404, detail="Licitação não possui protocolo para consulta.")
 
-        resultado = consultar_protocolo_audesp(token=token, protocolo=licitacao.protocolo)
-        if resultado["sucesso"]:
-            novo_status = resultado.get("status") or licitacao.status_protocolo
+        consulta = consultar_e_registrar_protocolo(
+            session=session,
+            token=token,
+            modulo="licitacao",
+            registro_id=licitacao.id,
+            codigo_documento=licitacao.codigo_edital,
+            protocolo=licitacao.protocolo,
+            origem="consulta_manual",
+            status_padrao=licitacao.status_protocolo or "Recebido",
+        )
+        if consulta["sucesso"]:
+            novo_status = consulta.get("status") or licitacao.status_protocolo
             licitacao.status_protocolo = novo_status
-            licitacao.detalhes_protocolo = json.dumps(resultado.get("dados", {}), ensure_ascii=False)
+            licitacao.detalhes_protocolo = json.dumps(consulta.get("dados", {}), ensure_ascii=False)
             licitacao.updated_at = datetime.now(timezone.utc)
             session.add(licitacao)
             session.commit()
@@ -332,13 +496,27 @@ class LicitacaoService:
                 "sucesso": True,
                 "protocolo": licitacao.protocolo,
                 "status": novo_status,
-                "dados": resultado.get("dados")
+                "is_rejeitado": consulta.get("is_rejeitado", False),
+                "possui_erros": consulta.get("possui_erros", False),
+                "erros_formatados": consulta.get("erros_formatados", []),
+                "erros_detalhados": consulta.get("erros_detalhados", []),
+                "dados": consulta.get("dados"),
+                "detalhes": consulta.get("dados"),
+                "historico": consulta.get("historico", []),
             }
         else:
             raise HTTPException(
-                status_code=resultado.get("status_code", 400),
-                detail=resultado.get("mensagem", "Erro ao consultar protocolo")
+                status_code=consulta.get("status_code", 400),
+                detail=consulta.get("mensagem", "Erro ao consultar protocolo")
             )
+
+    @staticmethod
+    def obter_historico_protocolo(session: Session, id: int) -> List[Dict[str, Any]]:
+        """Retorna o histórico de consultas de protocolo de uma licitação."""
+        licitacao = session.get(Licitacao, id)
+        if not licitacao:
+            raise HTTPException(status_code=404, detail="Licitação não encontrada")
+        return listar_historico_protocolo(session, "licitacao", licitacao.id, licitacao.protocolo)
 
     @staticmethod
     def retornar_rascunho(session: Session, id: int) -> Dict[str, Any]:

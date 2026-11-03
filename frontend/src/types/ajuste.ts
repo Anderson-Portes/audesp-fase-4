@@ -85,6 +85,8 @@ export interface DominiosAjusteResponse {
   tiposContrato: Record<string, string>;
   categoriasProcesso: Record<string, string>;
   tiposObjetoContrato: Record<string, string>;
+  objetosPorCategoria?: Record<number, number[]>;
+  fontesRecurso?: Record<number, string>;
   municipios?: MunicipioAudesp[];
   entidades?: EntidadeAudesp[];
 }

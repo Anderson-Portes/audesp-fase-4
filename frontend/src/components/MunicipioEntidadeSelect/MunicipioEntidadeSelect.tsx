@@ -2,6 +2,42 @@ import React from 'react';
 import { Col, Form } from 'react-bootstrap';
 import type { MunicipioAudesp, EntidadeAudesp } from '../../types/audesp';
 
+const STORAGE_KEY_MUNICIPIO = 'audesp_default_municipio';
+const STORAGE_KEY_ENTIDADE = 'audesp_default_entidade';
+
+export function getSavedMunicipio(fallback: number = 7071): number {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_MUNICIPIO);
+    const parsed = raw ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function getSavedEntidade(fallback: number = 11310): number {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_ENTIDADE);
+    const parsed = raw ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function saveDefaultMunicipioEntidade(municipio?: number, entidade?: number): void {
+  try {
+    if (municipio && Number.isFinite(municipio) && municipio > 0) {
+      localStorage.setItem(STORAGE_KEY_MUNICIPIO, String(municipio));
+    }
+    if (entidade && Number.isFinite(entidade) && entidade > 0) {
+      localStorage.setItem(STORAGE_KEY_ENTIDADE, String(entidade));
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
 interface MunicipioEntidadeSelectProps {
   municipio: number;
   entidade: number;
@@ -39,6 +75,16 @@ export const MunicipioEntidadeSelect: React.FC<MunicipioEntidadeSelectProps> = (
   const isCustomMun = customMunicipioMode || (!isMunicipioCadastrado && Boolean(municipio));
   const isCustomEnt = customEntidadeMode || (!isEntidadeCadastrada && Boolean(entidade));
 
+  const handleMunChange = (cod: number) => {
+    onMunicipioChange(cod);
+    saveDefaultMunicipioEntidade(cod, undefined);
+  };
+
+  const handleEntChange = (cod: number) => {
+    onEntidadeChange(cod);
+    saveDefaultMunicipioEntidade(undefined, cod);
+  };
+
   return (
     <>
       <Col md={municipioColMd}>
@@ -56,17 +102,17 @@ export const MunicipioEntidadeSelect: React.FC<MunicipioEntidadeSelectProps> = (
               } else if (val) {
                 setCustomMunicipioMode(false);
                 const cod = Number(val);
-                onMunicipioChange(cod);
+                handleMunChange(cod);
 
                 // Ao mudar o município, filtra as entidades pertencentes a ele
                 const possiveis = entidadesList.filter((ent) => ent.municipio === cod);
                 if (possiveis.length > 0) {
-                  onEntidadeChange(possiveis[0].codigo);
+                  handleEntChange(possiveis[0].codigo);
                   setCustomEntidadeMode(false);
                 } else {
-                  // Se o município não tem entidades cadastradas, zera a entidade
+                  // Se o município não tem entidades cadastradas, abre modo manual de código
                   onEntidadeChange(0);
-                  setCustomEntidadeMode(false);
+                  setCustomEntidadeMode(true);
                 }
               }
             }}
@@ -82,7 +128,7 @@ export const MunicipioEntidadeSelect: React.FC<MunicipioEntidadeSelectProps> = (
               </option>
             ))}
             <option value="CUSTOM">
-              {isCustomMun ? `Outro: Código manual (${municipio || 'digitar'})` : 'Outro (Digitar código manual)...'}
+              {isCustomMun ? `Outro: Código manual (${municipio || 'digitar'})` : 'Outro (Digitar código manual 1-9999)...'}
             </option>
           </Form.Select>
 
@@ -90,9 +136,11 @@ export const MunicipioEntidadeSelect: React.FC<MunicipioEntidadeSelectProps> = (
             <Form.Control
               type="number"
               size="sm"
+              min={1}
+              max={9999}
               value={municipio || ''}
-              onChange={(e) => onMunicipioChange(Number(e.target.value))}
-              placeholder="Digite o código AUDESP do Município"
+              onChange={(e) => handleMunChange(Number(e.target.value))}
+              placeholder="Digite o código AUDESP do Município (1 a 9999)"
               disabled={disabled}
               className="mt-1"
             />
@@ -117,14 +165,14 @@ export const MunicipioEntidadeSelect: React.FC<MunicipioEntidadeSelectProps> = (
                 onEntidadeChange(0);
               } else if (val) {
                 setCustomEntidadeMode(false);
-                onEntidadeChange(Number(val));
+                handleEntChange(Number(val));
               }
             }}
             disabled={disabled}
             className="mb-1"
           >
             {entidadesFiltradas.length === 0 ? (
-              <option value="">-- Nenhuma entidade cadastrada para este município --</option>
+              <option value="">-- Nenhuma entidade pré-cadastrada para este município --</option>
             ) : (
               entidadesFiltradas.map((ent) => (
                 <option key={ent.codigo} value={ent.codigo}>
@@ -133,7 +181,7 @@ export const MunicipioEntidadeSelect: React.FC<MunicipioEntidadeSelectProps> = (
               ))
             )}
             <option value="CUSTOM">
-              {isCustomEnt ? `Outra: Código manual (${entidade || 'digitar'})` : 'Outra (Digitar código manual)...'}
+              {isCustomEnt ? `Outra: Código manual (${entidade || 'digitar'})` : 'Outra (Digitar código manual 1-99999)...'}
             </option>
           </Form.Select>
 
@@ -141,9 +189,11 @@ export const MunicipioEntidadeSelect: React.FC<MunicipioEntidadeSelectProps> = (
             <Form.Control
               type="number"
               size="sm"
+              min={1}
+              max={99999}
               value={entidade || ''}
-              onChange={(e) => onEntidadeChange(Number(e.target.value))}
-              placeholder="Digite o código AUDESP da Entidade"
+              onChange={(e) => handleEntChange(Number(e.target.value))}
+              placeholder="Digite o código AUDESP da Entidade (1 a 99999)"
               disabled={disabled}
               className="mt-1"
             />

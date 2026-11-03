@@ -24,13 +24,21 @@ import {
   RotateCcw,
   CheckCircle2,
   FileDown,
-  Calendar
+  Calendar,
+  History
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import { PageHeader } from '../../components/PageHeader/PageHeader';
+import {
+  ProtocoloErrosAlert,
+  HistoricoProtocoloModal,
+  notificarResultadoProtocolo,
+} from '../../components/ProtocoloInfo/ProtocoloComponents';
+import { ImportacaoExportacaoToolbar } from '../../components/ImportacaoExportacao/ImportacaoExportacaoModal';
 import { editalService } from '../../services/editalService';
 import type { Edital } from '../../types/edital';
+import type { HistoricoProtocoloItem } from '../../utils/protocoloFormatter';
 import { formatDateBR, formatPncpMask } from '../../utils/formatters';
 
 export const EditaisList: React.FC = () => {
@@ -40,6 +48,13 @@ export const EditaisList: React.FC = () => {
   const [editais, setEditais] = useState<Edital[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+  const [showHistoricoModal, setShowHistoricoModal] = useState(false);
+  const [historicoLoading, setHistoricoLoading] = useState(false);
+  const [historicoItems, setHistoricoItems] = useState<HistoricoProtocoloItem[]>([]);
+  const [historicoDocInfo, setHistoricoDocInfo] = useState<{ codigo: string; protocolo?: string | null }>({
+    codigo: '',
+    protocolo: null,
+  });
 
   const carregarEditais = async () => {
     try {
@@ -104,7 +119,10 @@ export const EditaisList: React.FC = () => {
     try {
       setActionLoadingId(id);
       const res = await editalService.enviarEdital(id);
-      toast.success(`Edital enviado com sucesso! Protocolo: ${res.protocolo}`);
+      notificarResultadoProtocolo(res, {
+        prefixoSucesso: 'Edital enviado com sucesso!',
+        isTransmissao: true,
+      });
       carregarEditais();
     } catch (err: any) {
       const detail = err.response?.data?.detail;
@@ -132,13 +150,30 @@ export const EditaisList: React.FC = () => {
     try {
       setActionLoadingId(id);
       const res = await editalService.consultarProtocolo(id);
-      toast.success(`Situação atualizada no AUDESP: ${res.status}`);
+      notificarResultadoProtocolo(res, { isTransmissao: false });
       carregarEditais();
     } catch (err: any) {
       const msg = err.response?.data?.detail || 'Erro ao consultar protocolo';
       toast.error(msg);
     } finally {
       setActionLoadingId(null);
+    }
+  };
+
+  const handleVerHistoricoProtocolo = async (edital: Edital) => {
+    setHistoricoDocInfo({
+      codigo: edital.codigo_edital,
+      protocolo: edital.protocolo,
+    });
+    setShowHistoricoModal(true);
+    try {
+      setHistoricoLoading(true);
+      const data = await editalService.getHistoricoProtocolo(edital.id);
+      setHistoricoItems(data);
+    } catch {
+      toast.error('Erro ao carregar histórico de consultas do protocolo');
+    } finally {
+      setHistoricoLoading(false);
     }
   };
 
@@ -220,6 +255,12 @@ export const EditaisList: React.FC = () => {
           >
             <Plus size={18} /> Novo Edital
           </Button>
+
+          <ImportacaoExportacaoToolbar
+            modulo="editais"
+            tituloModulo="Editais"
+            onImportSuccess={carregarEditais}
+          />
         </div>
 
         {/* Busca com Form e InputGroup */}
@@ -361,6 +402,14 @@ export const EditaisList: React.FC = () => {
                           >
                             <RefreshCw size={14} className={isLoading ? 'spin' : ''} /> Consultar Protocolo
                           </Button>
+                          <Button
+                            variant="outline-secondary"
+                            onClick={() => handleVerHistoricoProtocolo(edital)}
+                            disabled={isLoading}
+                            title="Ver histórico de consultas de protocolo"
+                          >
+                            <History size={14} className="me-1" /> Histórico
+                          </Button>
                           {isRejected && (
                             <Button
                               variant="outline-warning"
@@ -418,13 +467,11 @@ export const EditaisList: React.FC = () => {
                     </div>
                   )}
 
-                  {edital.detalhes_protocolo && isRejected && (
-                    <div className="mt-2 alert alert-danger py-2 px-3 small mb-0">
-                      <strong>Retorno de Rejeição AUDESP:</strong>
-                      <pre className="mb-0 mt-1" style={{ whiteSpace: 'pre-wrap', maxHeight: '120px', overflowY: 'auto' }}>
-                        {edital.detalhes_protocolo}
-                      </pre>
-                    </div>
+                  {edital.detalhes_protocolo && (
+                    <ProtocoloErrosAlert
+                      detalhesProtocolo={edital.detalhes_protocolo}
+                      statusProtocolo={edital.status_protocolo}
+                    />
                   )}
                 </Card.Body>
               </Card>
@@ -432,6 +479,15 @@ export const EditaisList: React.FC = () => {
           })}
         </div>
       )}
+
+      <HistoricoProtocoloModal
+        show={showHistoricoModal}
+        onHide={() => setShowHistoricoModal(false)}
+        protocolo={historicoDocInfo.protocolo}
+        codigoDocumento={historicoDocInfo.codigo}
+        historico={historicoItems}
+        loading={historicoLoading}
+      />
     </Container>
   );
 };

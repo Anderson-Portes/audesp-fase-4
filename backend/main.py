@@ -34,6 +34,18 @@ from modules.auth.AuthController import router as auth_router
 app.include_router(auth_router)
 
 # Importa os models para registro das tabelas no startup
+from modules.protocolos.Protocolo import ProtocoloConsulta
+
+from modules.documentacao.Documentacao import AppConfig
+from modules.documentacao.DocumentacaoController import router as documentacao_router
+app.include_router(documentacao_router)
+
+from modules.importacao_exportacao.ImportacaoExportacaoController import router as importacao_exportacao_router
+app.include_router(importacao_exportacao_router)
+
+from modules.protocolos.ProtocoloController import router as protocolo_router
+app.include_router(protocolo_router)
+
 from modules.editais.Edital import Edital, EditalArquivo
 from modules.editais.EditalController import router as edital_router
 app.include_router(edital_router)
