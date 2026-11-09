@@ -810,7 +810,7 @@ export const AjusteForm: React.FC = () => {
             {origemTipo === 'edital' ? (
               <Form.Group className="mb-3">
                 <Form.Label className="fw-bold">
-                  Vincular Edital Local {adesaoParticipacao ? '(Opcional na Adesão)' : ''}:
+                  Vincular Edital / Certame {adesaoParticipacao ? '(Opcional na Adesão)' : ''}:
                   {selectedEditalSrp && (
                     <span className="badge bg-info ms-2">SRP (Exige Ata)</span>
                   )}
@@ -827,11 +827,28 @@ export const AjusteForm: React.FC = () => {
                   {editaisParaAjuste.map((ed) => (
                     <option key={ed.id} value={ed.id}>
                       {ed.codigo_edital} - {ed.numero_compra}/{ed.ano_compra} {ed.sem_pncp ? '(Sem PNCP)' : ''}
-                      {ed.status !== 'sent' ? ' [Rascunho]' : ''}
+                      {ed.status !== 'sent' ? ' [Edital Rascunho]' : ''}
                       {isEditalSrp(ed) ? ' [SRP]' : ''}
                     </option>
                   ))}
                 </Form.Select>
+                {referenciaEdital && (
+                  <div className="mt-2 small">
+                    {referenciaEdital.situacao_licitacao === 'enviada' ? (
+                      <span className="text-success fw-semibold d-inline-flex align-items-center gap-1">
+                        <CheckCircle2 size={14} /> Licitação homologada e transmitida ao AUDESP (itens e preços adjudicados disponíveis).
+                      </span>
+                    ) : referenciaEdital.situacao_licitacao === 'rascunho' ? (
+                      <span className="text-warning fw-semibold d-inline-flex align-items-center gap-1">
+                        <AlertCircle size={14} /> Licitação deste edital ainda está em rascunho (valores estimados do edital em uso).
+                      </span>
+                    ) : (
+                      <span className="text-muted d-inline-flex align-items-center gap-1">
+                        <AlertCircle size={14} /> Nenhuma licitação vinculada a este edital cadastrada ainda.
+                      </span>
+                    )}
+                  </div>
+                )}
               </Form.Group>
             ) : (
               <Form.Group className="mb-3">
@@ -1512,6 +1529,9 @@ export const AjusteForm: React.FC = () => {
                   <ListGroup style={{ maxHeight: '350px', overflowY: 'auto' }}>
                     {itensEdital.map((item: any) => {
                       const checked = selectedItens.includes(item.numeroItem);
+                      const detalheLic = referenciaEdital?.itens_detalhes?.[item.numeroItem];
+                      const temValorHomologado = detalheLic?.valorHomologado !== undefined && detalheLic?.valorHomologado !== null;
+
                       return (
                         <ListGroup.Item
                           key={item.numeroItem}
@@ -1525,16 +1545,35 @@ export const AjusteForm: React.FC = () => {
                           </div>
                           <div className="flex-grow-1">
                             <div className="d-flex justify-content-between align-items-center">
-                              <span className="fw-bold">Item {item.numeroItem}</span>
+                              <div className="d-flex align-items-center gap-2">
+                                <span className="fw-bold">Item {item.numeroItem}</span>
+                                {detalheLic?.homologado && (
+                                  <Badge bg={checked ? 'light' : 'success'} text={checked ? 'dark' : undefined}>
+                                    Homologado
+                                  </Badge>
+                                )}
+                              </div>
                               <Badge bg={checked ? 'light' : 'secondary'} text={checked ? 'dark' : undefined}>
                                 {item.materialOuServico === 'M' ? 'Material' : 'Serviço'}
                               </Badge>
                             </div>
                             <p className={`mb-1 small ${checked ? 'text-white' : 'text-dark'}`}>{item.descricao}</p>
-                            <div className={`d-flex gap-3 small ${checked ? 'text-light' : 'text-muted'}`}>
+                            <div className={`d-flex flex-wrap gap-3 small ${checked ? 'text-light' : 'text-muted'}`}>
                               <span>Qtd: <strong>{item.quantidade}</strong> {item.unidadeMedida}</span>
-                              {item.valorUnitarioEstimado && (
+                              {temValorHomologado ? (
+                                <span>
+                                  Unitário Homologado: <strong className={checked ? 'text-white fw-bold' : 'text-success fw-bold'}>R$ {Number(detalheLic.valorHomologado).toFixed(2)}</strong>
+                                  {item.valorUnitarioEstimado && (
+                                    <span className="ms-1 opacity-75 text-decoration-line-through">
+                                      (Est: R$ {Number(item.valorUnitarioEstimado).toFixed(2)})
+                                    </span>
+                                  )}
+                                </span>
+                              ) : item.valorUnitarioEstimado ? (
                                 <span>Unit: <strong>R$ {Number(item.valorUnitarioEstimado).toFixed(2)}</strong></span>
+                              ) : null}
+                              {detalheLic?.vencedorNome && (
+                                <span>Vencedor: <strong>{detalheLic.vencedorNome}</strong></span>
                               )}
                             </div>
                           </div>

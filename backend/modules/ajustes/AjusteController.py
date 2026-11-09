@@ -82,6 +82,15 @@ def obter_historico_protocolo(
     return AjusteService.obter_historico_protocolo(session, ajuste_id)
 
 
+@router.delete("/{ajuste_id}")
+def excluir_ajuste(
+    ajuste_id: int,
+    session: Session = Depends(get_session)
+):
+    """Exclui um ajuste (apenas rascunhos)."""
+    return AjusteService.excluir_ajuste(session, ajuste_id)
+
+
 @router.post("/{ajuste_id}/retornar-rascunho", response_model=AjusteContrato)
 def retornar_rascunho(
     ajuste_id: int,

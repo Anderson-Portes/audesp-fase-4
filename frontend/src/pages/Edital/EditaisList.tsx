@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Container, 
@@ -25,11 +25,15 @@ import {
   CheckCircle2,
   FileDown,
   Calendar,
-  History
+  History,
+  LayoutGrid,
+  Table as TableIcon
 } from 'lucide-react';
+import type { ColumnDef } from '@tanstack/react-table';
 import toast from 'react-hot-toast';
 
 import { PageHeader } from '../../components/PageHeader/PageHeader';
+import { DataTable } from '../../components/DataTable/DataTable';
 import {
   ProtocoloErrosAlert,
   HistoricoProtocoloModal,
@@ -44,10 +48,12 @@ import { formatDateBR, formatPncpMask } from '../../utils/formatters';
 export const EditaisList: React.FC = () => {
   const navigate = useNavigate();
   const [tab, setTab] = useState<'draft' | 'sent'>('draft');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [search, setSearch] = useState('');
   const [editais, setEditais] = useState<Edital[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+  const [batchLoading, setBatchLoading] = useState(false);
   const [showHistoricoModal, setShowHistoricoModal] = useState(false);
   const [historicoLoading, setHistoricoLoading] = useState(false);
   const [historicoItems, setHistoricoItems] = useState<HistoricoProtocoloItem[]>([]);
@@ -193,6 +199,216 @@ export const EditaisList: React.FC = () => {
     }
   };
 
+  // Ações Coletivas
+  const handleExcluirColetivo = async (itens: Edital[], clearSelection: () => void) => {
+    if (!window.confirm(`Tem certeza que deseja excluir os ${itens.length} rascunhos de editais selecionados?`)) {
+      return;
+    }
+    try {
+      setBatchLoading(true);
+      let sucessos = 0;
+      let erros = 0;
+      for (const item of itens) {
+        try {
+          await editalService.deleteEdital(item.id);
+          sucessos++;
+        } catch {
+          erros++;
+        }
+      }
+      clearSelection();
+      if (erros === 0) {
+        toast.success(`${sucessos} rascunho(s) excluído(s) com sucesso!`);
+      } else {
+        toast.error(`Exclusão concluída: ${sucessos} sucesso(s) e ${erros} falha(s).`);
+      }
+      carregarEditais();
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
+  const handleConsultarProtocoloColetivo = async (itens: Edital[], clearSelection: () => void) => {
+    try {
+      setBatchLoading(true);
+      toast.loading(`Consultando ${itens.length} protocolo(s)...`, { id: 'batch-consultar' });
+      let sucessos = 0;
+      let erros = 0;
+      for (const item of itens) {
+        try {
+          await editalService.consultarProtocolo(item.id);
+          sucessos++;
+        } catch {
+          erros++;
+        }
+      }
+      toast.dismiss('batch-consultar');
+      clearSelection();
+      toast.success(`${sucessos} protocolo(s) consultado(s) com sucesso! ${erros > 0 ? `(${erros} falha(s))` : ''}`);
+      carregarEditais();
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
+  const columns: ColumnDef<Edital, any>[] = useMemo(() => [
+    {
+      id: 'select',
+      header: ({ table }) => (
+        <Form.Check
+          type="checkbox"
+          checked={table.getIsAllPageRowsSelected()}
+          onChange={table.getToggleAllPageRowsSelectedHandler()}
+          aria-label="Selecionar todos"
+        />
+      ),
+      cell: ({ row }) => (
+        <Form.Check
+          type="checkbox"
+          checked={row.getIsSelected()}
+          onChange={row.getToggleSelectedHandler()}
+          aria-label="Selecionar linha"
+        />
+      ),
+      size: 40,
+      enableSorting: false,
+    },
+    {
+      accessorKey: 'codigo_edital',
+      header: 'Código Edital / PNCP',
+      cell: ({ row }) => {
+        const ed = row.original;
+        const display = ed.codigo_edital.length === 25 ? formatPncpMask(ed.codigo_edital) : ed.codigo_edital;
+        return (
+          <div>
+            <span className="font-monospace fw-bold text-dark">{display}</span>
+            {ed.retificacao && (
+              <Badge bg="warning" text="dark" className="ms-2 small">Retificação</Badge>
+            )}
+            <div className="text-muted small">Mun: {ed.municipio} | Ent: {ed.entidade}</div>
+          </div>
+        );
+      },
+    },
+    {
+      id: 'compra_processo',
+      header: 'Compra / Processo',
+      cell: ({ row }) => {
+        const ed = row.original;
+        return (
+          <div>
+            <div><strong>Nº Compra:</strong> {ed.numero_compra || '-'} / {ed.ano_compra || '-'}</div>
+            <div className="text-muted small"><strong>Proc:</strong> {ed.numero_processo || '-'}</div>
+          </div>
+        );
+      },
+    },
+    {
+      accessorKey: 'objeto_compra',
+      header: 'Objeto',
+      cell: ({ row }) => {
+        const obj = row.original.objeto_compra;
+        return (
+          <div className="text-truncate" style={{ maxWidth: '280px' }} title={obj || ''}>
+            {obj || '-'}
+          </div>
+        );
+      },
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      cell: ({ row }) => getStatusBadge(row.original),
+    },
+    {
+      accessorKey: 'updated_at',
+      header: 'Atualizado em',
+      cell: ({ row }) => formatDateBR(row.original.updated_at),
+    },
+    {
+      id: 'acoes',
+      header: 'Ações',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const edital = row.original;
+        const isLoading = actionLoadingId === edital.id;
+        const isRejected = (edital.status_protocolo || '').toLowerCase().includes('rejeitado');
+
+        return (
+          <ButtonGroup size="sm">
+            {edital.pdf_nome_original && (
+              <Button
+                variant="outline-secondary"
+                onClick={() => handleDownloadPdf(edital.id, edital.codigo_edital)}
+                disabled={isLoading}
+                title={`Baixar PDF: ${edital.pdf_nome_original}`}
+              >
+                <FileDown size={14} />
+              </Button>
+            )}
+            {tab === 'draft' ? (
+              <>
+                <Button
+                  variant="outline-primary"
+                  onClick={() => navigate(`/editais/${edital.id}`)}
+                  disabled={isLoading}
+                  title="Editar rascunho"
+                >
+                  <Edit size={14} />
+                </Button>
+                <Button
+                  variant="success"
+                  onClick={() => handleEnviar(edital.id, edital.codigo_edital)}
+                  disabled={isLoading}
+                  title="Transmitir edital para a API do AUDESP"
+                >
+                  <Send size={14} />
+                </Button>
+                <Button
+                  variant="outline-danger"
+                  onClick={() => handleExcluir(edital.id, edital.codigo_edital)}
+                  disabled={isLoading}
+                  title="Excluir rascunho"
+                >
+                  <Trash2 size={14} />
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="outline-info"
+                  onClick={() => handleConsultarProtocolo(edital.id)}
+                  disabled={isLoading}
+                  title="Consultar situação do protocolo no AUDESP"
+                >
+                  <RefreshCw size={14} className={isLoading ? 'spin' : ''} />
+                </Button>
+                <Button
+                  variant="outline-secondary"
+                  onClick={() => handleVerHistoricoProtocolo(edital)}
+                  disabled={isLoading}
+                  title="Ver histórico de consultas de protocolo"
+                >
+                  <History size={14} />
+                </Button>
+                {isRejected && (
+                  <Button
+                    variant="outline-warning"
+                    onClick={() => handleRetornarRascunho(edital.id)}
+                    disabled={isLoading}
+                    title="Retornar para rascunho e corrigir erros"
+                  >
+                    <RotateCcw size={14} />
+                  </Button>
+                )}
+              </>
+            )}
+          </ButtonGroup>
+        );
+      },
+    },
+  ], [tab, actionLoadingId]);
+
   const getStatusBadge = (edital: Edital) => {
     if (edital.status === 'draft') {
       return <Badge bg="secondary">Rascunho Local</Badge>;
@@ -298,6 +514,26 @@ export const EditaisList: React.FC = () => {
           >
             <RefreshCw size={14} className={loading ? 'spin' : ''} />
           </Button>
+
+          {/* Toggle de Visualização: Tabela vs Cards */}
+          <ButtonGroup size="sm" className="shadow-sm">
+            <Button
+              variant={viewMode === 'table' ? 'success' : 'outline-secondary'}
+              onClick={() => setViewMode('table')}
+              title="Visualização em Tabela (DataTable)"
+              className="d-flex align-items-center gap-1"
+            >
+              <TableIcon size={14} /> Tabela
+            </Button>
+            <Button
+              variant={viewMode === 'cards' ? 'success' : 'outline-secondary'}
+              onClick={() => setViewMode('cards')}
+              title="Visualização em Cards"
+              className="d-flex align-items-center gap-1"
+            >
+              <LayoutGrid size={14} /> Cards
+            </Button>
+          </ButtonGroup>
         </Form>
       </div>
 
@@ -331,6 +567,43 @@ export const EditaisList: React.FC = () => {
             )}
           </Card.Body>
         </Card>
+      ) : viewMode === 'table' ? (
+        <DataTable<Edital>
+          columns={columns}
+          data={editais}
+          title={`Editais (${tab === 'draft' ? 'Rascunhos' : 'Enviados'})`}
+          enableSelection={true}
+          getRowId={(row) => String(row.id)}
+          renderBatchActions={(selected, clearSelection) => (
+            <>
+              {tab === 'draft' ? (
+                <Button
+                  variant="outline-danger"
+                  size="sm"
+                  disabled={batchLoading}
+                  onClick={() => handleExcluirColetivo(selected, clearSelection)}
+                  className="d-flex align-items-center gap-1"
+                  title="Excluir rascunhos selecionados"
+                >
+                  <Trash2 size={14} />
+                  <span>Excluir Selecionados ({selected.length})</span>
+                </Button>
+              ) : (
+                <Button
+                  variant="outline-info"
+                  size="sm"
+                  disabled={batchLoading}
+                  onClick={() => handleConsultarProtocoloColetivo(selected, clearSelection)}
+                  className="d-flex align-items-center gap-1"
+                  title="Consultar protocolo dos editais selecionados no TCESP"
+                >
+                  <RefreshCw size={14} className={batchLoading ? 'spin' : ''} />
+                  <span>Consultar Protocolos ({selected.length})</span>
+                </Button>
+              )}
+            </>
+          )}
+        />
       ) : (
         <div className="d-flex flex-column gap-3">
           {editais.map((edital) => {

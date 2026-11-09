@@ -136,7 +136,8 @@ class LicitacaoService:
         numeros_itens = extrair_numeros_itens_licitacao(lic_doc) if lic_enviada else None
         resultado = extrair_resultado_licitacao(lic_doc, edital_doc) if lic_enviada else {
             "itensHomologados": [],
-            "fornecedoresVencedores": []
+            "fornecedoresVencedores": [],
+            "itensDetalhes": {}
         }
 
         return {
@@ -148,7 +149,8 @@ class LicitacaoService:
             "licitacao_enviada_id": lic_enviada.id if lic_enviada else None,
             "numeros_itens_licitacao": sorted(list(numeros_itens)) if numeros_itens is not None else None,
             "itens_homologados": resultado["itensHomologados"],
-            "fornecedores_vencedores": resultado["fornecedoresVencedores"]
+            "fornecedores_vencedores": resultado["fornecedoresVencedores"],
+            "itens_detalhes": resultado.get("itensDetalhes", {})
         }
 
     @staticmethod

@@ -25,6 +25,11 @@ export const ajusteService = {
     return response.data;
   },
 
+  async deleteAjuste(id: number): Promise<{ sucesso: boolean; mensagem: string }> {
+    const response = await api.delete<{ sucesso: boolean; mensagem: string }>(`/api/ajustes/${id}`);
+    return response.data;
+  },
+
   async enviarAjuste(id: number, forcar: boolean = false): Promise<any> {
     const response = await api.post(`/api/ajustes/${id}/enviar?forcar=${forcar}`);
     return response.data;

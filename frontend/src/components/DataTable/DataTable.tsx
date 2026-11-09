@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -11,6 +11,7 @@ import type {
   ColumnDef,
   SortingState,
   VisibilityState,
+  RowSelectionState,
 } from '@tanstack/react-table';
 import { 
   Card, 
@@ -29,22 +30,36 @@ interface DataTableProps<TData> {
   columns: ColumnDef<TData, any>[];
   data: TData[];
   title?: string;
+  enableSelection?: boolean;
+  selectedRows?: Record<string, boolean>;
+  onRowSelectionChange?: (selection: Record<string, boolean>) => void;
+  getRowId?: (row: TData, index: number) => string;
+  renderBatchActions?: (selectedRows: TData[], clearSelection: () => void) => React.ReactNode;
 }
 
 export function DataTable<TData>({
   columns,
   data,
-  title = 'Dados'
+  title = 'Dados',
+  enableSelection = false,
+  selectedRows,
+  onRowSelectionChange,
+  getRowId,
+  renderBatchActions,
 }: DataTableProps<TData>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const [internalRowSelection, setInternalRowSelection] = useState<RowSelectionState>({});
   
   // Custom Pagination state defaults to 10 rows
   const [pagination, setPagination] = useState({
     pageIndex: 0,
     pageSize: 10,
   });
+
+  const rowSelectionState = selectedRows !== undefined ? selectedRows : internalRowSelection;
+  const setRowSelection = onRowSelectionChange || setInternalRowSelection;
 
   const table = useReactTable({
     data,
@@ -54,7 +69,11 @@ export function DataTable<TData>({
       globalFilter,
       columnVisibility,
       pagination,
+      rowSelection: rowSelectionState,
     },
+    enableRowSelection: enableSelection,
+    getRowId: getRowId || ((_, index) => String(index)),
+    onRowSelectionChange: setRowSelection as any,
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
     onColumnVisibilityChange: setColumnVisibility,
@@ -65,17 +84,25 @@ export function DataTable<TData>({
     getPaginationRowModel: getPaginationRowModel(),
   });
 
+  const selectedData = table.getSelectedRowModel().rows.map(r => r.original);
+  const clearSelection = () => table.resetRowSelection();
+
   // Export to CSV
   const exportCSV = () => {
     const headers = table.getAllLeafColumns()
-      .filter((col: any) => col.getIsVisible())
-      .map((col: any) => col.columnDef.header as string);
+      .filter((col: any) => col.getIsVisible() && col.id !== 'select' && col.id !== 'acoes')
+      .map((col: any) => {
+        const h = col.columnDef.header;
+        return typeof h === 'string' ? h : col.id;
+      });
     
     const rows = table.getRowModel().rows.map((row: any) => {
-      return row.getVisibleCells().map((cell: any) => {
-        const value = cell.getValue();
-        return value !== null && value !== undefined ? `"${String(value).replace(/"/g, '""')}"` : '""';
-      }).join(',');
+      return row.getVisibleCells()
+        .filter((cell: any) => cell.column.id !== 'select' && cell.column.id !== 'acoes')
+        .map((cell: any) => {
+          const value = cell.getValue();
+          return value !== null && value !== undefined ? `"${String(value).replace(/"/g, '""')}"` : '""';
+        }).join(',');
     });
 
     const csvContent = [headers.join(','), ...rows].join('\n');
@@ -93,14 +120,19 @@ export function DataTable<TData>({
   const exportPDF = () => {
     const doc = new jsPDF();
     const headers = table.getAllLeafColumns()
-      .filter((col: any) => col.getIsVisible())
-      .map((col: any) => col.columnDef.header as string);
+      .filter((col: any) => col.getIsVisible() && col.id !== 'select' && col.id !== 'acoes')
+      .map((col: any) => {
+        const h = col.columnDef.header;
+        return typeof h === 'string' ? h : col.id;
+      });
     
     const rows = table.getRowModel().rows.map((row: any) => 
-      row.getVisibleCells().map((cell: any) => {
-        const value = cell.getValue();
-        return value !== null && value !== undefined ? String(value) : '';
-      })
+      row.getVisibleCells()
+        .filter((cell: any) => cell.column.id !== 'select' && cell.column.id !== 'acoes')
+        .map((cell: any) => {
+          const value = cell.getValue();
+          return value !== null && value !== undefined ? String(value) : '';
+        })
     );
 
     doc.text(`Relatório: ${title}`, 14, 15);
@@ -141,21 +173,23 @@ export function DataTable<TData>({
             </Dropdown.Toggle>
             <Dropdown.Menu className="p-2 shadow" style={{ minWidth: '200px' }}>
               <div className="mb-2 fw-bold text-muted small px-2">Mostrar/Ocultar</div>
-              {table.getAllLeafColumns().map((column: any) => (
-                <div key={column.id} className="px-2 py-1">
-                  <Form.Check
-                    type="checkbox"
-                    id={`col-${column.id}`}
-                    label={
-                      typeof column.columnDef.header === 'string'
-                        ? column.columnDef.header
-                        : column.id
-                    }
-                    checked={column.getIsVisible()}
-                    onChange={column.getToggleVisibilityHandler()}
-                    className="small user-select-none"
-                  />
-                </div>
+              {table.getAllLeafColumns()
+                .filter((column: any) => column.id !== 'select')
+                .map((column: any) => (
+                  <div key={column.id} className="px-2 py-1">
+                    <Form.Check
+                      type="checkbox"
+                      id={`col-${column.id}`}
+                      label={
+                        typeof column.columnDef.header === 'string'
+                          ? column.columnDef.header
+                          : column.id
+                      }
+                      checked={column.getIsVisible()}
+                      onChange={column.getToggleVisibilityHandler()}
+                      className="small user-select-none"
+                    />
+                  </div>
               ))}
             </Dropdown.Menu>
           </Dropdown>
@@ -181,6 +215,28 @@ export function DataTable<TData>({
           </Button>
         </div>
       </Card.Header>
+
+      {/* Barra de Ações Coletivas quando houver itens selecionados */}
+      {enableSelection && selectedData.length > 0 && renderBatchActions && (
+        <div className="bg-light border-bottom px-3 py-2 d-flex flex-wrap align-items-center justify-content-between gap-2 animate-fadeIn">
+          <div className="d-flex align-items-center gap-2">
+            <span className="badge bg-primary fs-6 fw-normal">
+              {selectedData.length} item(ns) selecionado(s)
+            </span>
+            <Button
+              variant="link"
+              size="sm"
+              className="text-decoration-none p-0 text-muted small"
+              onClick={clearSelection}
+            >
+              Desmarcar todos
+            </Button>
+          </div>
+          <div className="d-flex align-items-center gap-2">
+            {renderBatchActions(selectedData, clearSelection)}
+          </div>
+        </div>
+      )}
 
       <Card.Body className="p-0">
         <Table responsive hover striped className="mb-0">
@@ -221,7 +277,7 @@ export function DataTable<TData>({
           <tbody>
             {table.getRowModel().rows?.length > 0 ? (
               table.getRowModel().rows.map((row: any) => (
-                <tr key={row.id}>
+                <tr key={row.id} className={row.getIsSelected() ? 'table-primary bg-opacity-10' : ''}>
                   {row.getVisibleCells().map((cell: any) => (
                     <td key={cell.id} className="align-middle">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -265,7 +321,7 @@ export function DataTable<TData>({
         <div className="d-flex align-items-center gap-2">
           <span className="text-muted small me-2">
             Página <strong>{table.getState().pagination.pageIndex + 1}</strong> de{' '}
-            <strong>{table.getPageCount()}</strong>
+            <strong>{table.getPageCount() || 1}</strong>
           </span>
           <ButtonGroup size="sm">
             <Button

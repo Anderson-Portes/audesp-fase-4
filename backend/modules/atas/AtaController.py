@@ -82,6 +82,15 @@ def obter_historico_protocolo(
     return AtaService.obter_historico_protocolo(session, ata_id)
 
 
+@router.delete("/{ata_id}")
+def excluir_ata(
+    ata_id: int,
+    session: Session = Depends(get_session)
+):
+    """Exclui uma ata de registro de preços (apenas se for rascunho)."""
+    return AtaService.excluir_ata(session, ata_id)
+
+
 @router.post("/{ata_id}/retornar-rascunho", response_model=AtaRegistroPreco)
 def retornar_rascunho(
     ata_id: int,

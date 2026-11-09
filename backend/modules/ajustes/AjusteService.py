@@ -412,6 +412,18 @@ class AjusteService:
         return listar_historico_protocolo(session, "ajuste", ajuste.id, ajuste.protocolo)
 
     @staticmethod
+    def excluir_ajuste(session: Session, ajuste_id: int) -> Dict[str, Any]:
+        """Exclui um ajuste (apenas rascunhos)."""
+        ajuste = session.get(AjusteContrato, ajuste_id)
+        if not ajuste:
+            raise HTTPException(status_code=404, detail="Ajuste não encontrado.")
+        if ajuste.status == "sent":
+            raise HTTPException(status_code=400, detail="Não é possível excluir um ajuste já transmitido ao AUDESP.")
+        session.delete(ajuste)
+        session.commit()
+        return {"sucesso": True, "mensagem": "Ajuste excluído com sucesso."}
+
+    @staticmethod
     def retornar_rascunho(session: Session, ajuste_id: int) -> AjusteContrato:
         """Destrava ajuste para edição em modo rascunho."""
         ajuste = session.get(AjusteContrato, ajuste_id)

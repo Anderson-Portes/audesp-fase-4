@@ -498,23 +498,40 @@ export const AtaForm: React.FC = () => {
       <Row className="g-4">
         {/* Seções em 100% de largura empilhadas verticalmente */}
         <Col xs={12}>
-          <CardBox title="1. Edital e Identificadores do TCESP">
+          <CardBox title="1. Edital / Licitação e Identificadores do TCESP">
             <Form.Group className="mb-3">
-              <Form.Label className="fw-bold">Vincular a um Edital SRP Enviado:</Form.Label>
+              <Form.Label className="fw-bold">Vincular a um Edital / Licitação SRP:</Form.Label>
               <Form.Select
                 value={editalId}
                 onChange={(e) => handleSelectEdital(Number(e.target.value))}
                 disabled={isSent}
               >
-                <option value="">-- Selecione um edital SRP para autopreenchimento --</option>
+                <option value="">-- Selecione o edital / certame homologado para puxar itens e preços --</option>
                 {editaisParaAta.map((ed) => (
                   <option key={ed.id} value={ed.id}>
                     {ed.codigo_edital} - {ed.numero_compra}/{ed.ano_compra} ({ed.objeto_compra ? ed.objeto_compra.substring(0, 60) + '...' : ''})
-                    {ed.status !== 'sent' ? ' [Rascunho]' : ''}
+                    {ed.status !== 'sent' ? ' [Edital Rascunho]' : ''}
                     {!isEditalSrp(ed) ? ' [Sem SRP]' : ' [SRP]'}
                   </option>
                 ))}
               </Form.Select>
+              {referenciaEdital && (
+                <div className="mt-2 small">
+                  {referenciaEdital.situacao_licitacao === 'enviada' ? (
+                    <span className="text-success fw-semibold d-inline-flex align-items-center gap-1">
+                      <CheckCircle2 size={14} /> Licitação homologada e transmitida ao AUDESP (preços atualizados disponíveis).
+                    </span>
+                  ) : referenciaEdital.situacao_licitacao === 'rascunho' ? (
+                    <span className="text-warning fw-semibold d-inline-flex align-items-center gap-1">
+                      <AlertCircle size={14} /> Licitação deste edital ainda está em rascunho (preços estimados do edital em uso).
+                    </span>
+                  ) : (
+                    <span className="text-muted d-inline-flex align-items-center gap-1">
+                      <AlertCircle size={14} /> Nenhuma licitação vinculada a este edital cadastrada ainda.
+                    </span>
+                  )}
+                </div>
+              )}
               {avisoBloqueioEnvio && (
                 <div className="alert alert-warning py-2 px-3 mt-2 mb-0 small d-flex align-items-center gap-2">
                   <AlertCircle size={16} />
@@ -699,6 +716,9 @@ export const AtaForm: React.FC = () => {
                 <ListGroup style={{ maxHeight: '420px', overflowY: 'auto' }}>
                   {itensCompra.map((item: any) => {
                     const checked = selectedItens.includes(item.numeroItem);
+                    const detalheLic = referenciaEdital?.itens_detalhes?.[item.numeroItem];
+                    const temValorHomologado = detalheLic?.valorHomologado !== undefined && detalheLic?.valorHomologado !== null;
+
                     return (
                       <ListGroup.Item
                         key={item.numeroItem}
@@ -712,16 +732,35 @@ export const AtaForm: React.FC = () => {
                         </div>
                         <div className="flex-grow-1">
                           <div className="d-flex justify-content-between align-items-center">
-                            <span className="fw-bold">Item {item.numeroItem}</span>
+                            <div className="d-flex align-items-center gap-2">
+                              <span className="fw-bold">Item {item.numeroItem}</span>
+                              {detalheLic?.homologado && (
+                                <Badge bg={checked ? 'light' : 'success'} text={checked ? 'dark' : undefined}>
+                                  Homologado
+                                </Badge>
+                              )}
+                            </div>
                             <Badge bg={checked ? 'light' : 'secondary'} text={checked ? 'dark' : undefined}>
                               {item.materialOuServico === 'M' ? 'Material' : 'Serviço'}
                             </Badge>
                           </div>
                           <p className={`mb-1 small ${checked ? 'text-white' : 'text-dark'}`}>{item.descricao}</p>
-                          <div className={`d-flex gap-3 small ${checked ? 'text-light' : 'text-muted'}`}>
+                          <div className={`d-flex flex-wrap gap-3 small ${checked ? 'text-light' : 'text-muted'}`}>
                             <span>Qtd: <strong>{item.quantidade}</strong> {item.unidadeMedida}</span>
-                            {item.valorUnitarioEstimado && (
-                              <span>Unitário: <strong>R$ {Number(item.valorUnitarioEstimado).toFixed(2)}</strong></span>
+                            {temValorHomologado ? (
+                              <span>
+                                Unitário Homologado: <strong className={checked ? 'text-white fw-bold' : 'text-success fw-bold'}>R$ {Number(detalheLic.valorHomologado).toFixed(2)}</strong>
+                                {item.valorUnitarioEstimado && (
+                                  <span className={`ms-1 opacity-75 text-decoration-line-through`}>
+                                    (Est: R$ {Number(item.valorUnitarioEstimado).toFixed(2)})
+                                  </span>
+                                )}
+                              </span>
+                            ) : item.valorUnitarioEstimado ? (
+                              <span>Unitário Estimado: <strong>R$ {Number(item.valorUnitarioEstimado).toFixed(2)}</strong></span>
+                            ) : null}
+                            {detalheLic?.vencedorNome && (
+                              <span>Vencedor: <strong>{detalheLic.vencedorNome}</strong></span>
                             )}
                           </div>
                         </div>

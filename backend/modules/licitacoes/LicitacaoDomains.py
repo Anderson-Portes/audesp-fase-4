@@ -304,9 +304,44 @@ def extrair_resultado_licitacao(
 
     fornecedores_lista.sort(key=lambda f: f["itens"][0] if f["itens"] else 0)
 
+    # Mapeia detalhes de cada item julgado (valor unitário homologado, vencedor, situação)
+    itens_detalhes: Dict[int, Dict[str, Any]] = {}
+    for item in itens_lic:
+        try:
+            num_item = int(item.get("numeroItem"))
+        except Exception:
+            continue
+
+        vencedor_item = next(
+            (lic for lic in (item.get("licitantes") or []) if isinstance(lic, dict) and lic.get("resultadoHabilitacao") == 1),
+            None
+        )
+
+        valor_homologado = None
+        if vencedor_item:
+            try:
+                raw_v = vencedor_item.get("valor")
+                if raw_v is not None:
+                    valor_homologado = float(raw_v)
+            except Exception:
+                valor_homologado = None
+
+        itens_detalhes[num_item] = {
+            "numeroItem": num_item,
+            "situacaoCompraItemId": item.get("situacaoCompraItemId"),
+            "homologado": item.get("situacaoCompraItemId") == 2,
+            "valorHomologado": valor_homologado,
+            "tipoValor": item.get("tipoValor"),
+            "tipoOrcamento": item.get("tipoOrcamento"),
+            "tipoProposta": item.get("tipoProposta"),
+            "vencedorNi": normalizar_ni_pessoa(vencedor_item.get("tipoPessoaId"), vencedor_item.get("niPessoa")) if vencedor_item else None,
+            "vencedorNome": vencedor_item.get("nomeRazaoSocial") if vencedor_item else None,
+        }
+
     return {
         "itensHomologados": itens_homologados,
-        "fornecedoresVencedores": fornecedores_lista
+        "fornecedoresVencedores": fornecedores_lista,
+        "itensDetalhes": itens_detalhes
     }
 
 

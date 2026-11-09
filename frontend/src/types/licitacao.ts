@@ -80,13 +80,29 @@ export interface FornecedorVencedorLicitacao {
   valorSugerido?: number | null;
 }
 
+export interface ItemDetalheLicitacao {
+  numeroItem: number;
+  situacaoCompraItemId?: number;
+  homologado: boolean;
+  valorHomologado?: number | null;
+  tipoValor?: 'M' | 'P';
+  tipoOrcamento?: number;
+  tipoProposta?: number;
+  vencedorNi?: string | null;
+  vencedorNome?: string | null;
+}
+
 export interface ReferenciaEditalResponse {
   edital_id: number;
+  edital_status?: string;
+  edital_srp?: boolean;
+  sem_pncp?: boolean;
   situacao_licitacao: 'inexistente' | 'rascunho' | 'enviada';
   licitacao_enviada_id?: number | null;
   numeros_itens_licitacao: number[];
   itens_homologados: number[];
   fornecedores_vencedores: FornecedorVencedorLicitacao[];
+  itens_detalhes?: Record<number, ItemDetalheLicitacao>;
 }
 
 export interface Licitacao {

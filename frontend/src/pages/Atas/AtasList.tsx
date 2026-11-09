@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Container, 
@@ -8,7 +8,8 @@ import {
   Form, 
   Table, 
   Badge, 
-  Spinner 
+  Spinner,
+  Card
 } from 'react-bootstrap';
 import { 
   Layers, 
@@ -17,16 +18,21 @@ import {
   RefreshCw, 
   Send, 
   Edit, 
+  Trash2,
   RotateCcw,
   CheckCircle2,
   Calendar,
   AlertTriangle,
-  History
+  History,
+  LayoutGrid,
+  Table as TableIcon
 } from 'lucide-react';
+import type { ColumnDef } from '@tanstack/react-table';
 import toast from 'react-hot-toast';
 
 import { PageHeader } from '../../components/PageHeader/PageHeader';
 import { CardBox } from '../../components/CardBox/CardBox';
+import { DataTable } from '../../components/DataTable/DataTable';
 import {
   ProtocoloErrosAlert,
   HistoricoProtocoloModal,
@@ -42,10 +48,12 @@ import { formatDateBR } from '../../utils/formatters';
 export const AtasList: React.FC = () => {
   const navigate = useNavigate();
   const [tab, setTab] = useState<'draft' | 'sent'>('draft');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [search, setSearch] = useState('');
   const [atas, setAtas] = useState<AtaRegistroPreco[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+  const [batchLoading, setBatchLoading] = useState(false);
   const [showHistoricoModal, setShowHistoricoModal] = useState(false);
   const [historicoLoading, setHistoricoLoading] = useState(false);
   const [historicoItems, setHistoricoItems] = useState<HistoricoProtocoloItem[]>([]);
@@ -73,6 +81,23 @@ export const AtasList: React.FC = () => {
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     carregarAtas();
+  };
+
+  const handleExcluir = async (id: number, numeroAta: string) => {
+    if (!window.confirm(`Tem certeza que deseja excluir o rascunho da Ata ${numeroAta}?`)) {
+      return;
+    }
+    try {
+      setActionLoadingId(id);
+      await ataService.deleteAta(id);
+      toast.success('Rascunho de ata excluído com sucesso');
+      carregarAtas();
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || 'Erro ao excluir rascunho de ata';
+      toast.error(msg);
+    } finally {
+      setActionLoadingId(null);
+    }
   };
 
   const handleEnviar = async (id: number, numeroAta: string) => {
@@ -164,6 +189,250 @@ export const AtasList: React.FC = () => {
     }
   };
 
+  // Ações Coletivas
+  const handleExcluirColetivo = async (itens: AtaRegistroPreco[], clearSelection: () => void) => {
+    if (!window.confirm(`Tem certeza que deseja excluir os ${itens.length} rascunhos de atas selecionados?`)) {
+      return;
+    }
+    try {
+      setBatchLoading(true);
+      let sucessos = 0;
+      let erros = 0;
+      for (const item of itens) {
+        try {
+          await ataService.deleteAta(item.id);
+          sucessos++;
+        } catch {
+          erros++;
+        }
+      }
+      clearSelection();
+      if (erros === 0) {
+        toast.success(`${sucessos} rascunho(s) excluído(s) com sucesso!`);
+      } else {
+        toast.error(`Exclusão concluída: ${sucessos} sucesso(s) e ${erros} falha(s).`);
+      }
+      carregarAtas();
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
+  const handleConsultarProtocoloColetivo = async (itens: AtaRegistroPreco[], clearSelection: () => void) => {
+    try {
+      setBatchLoading(true);
+      toast.loading(`Consultando ${itens.length} protocolo(s)...`, { id: 'batch-consultar-atas' });
+      let sucessos = 0;
+      let erros = 0;
+      for (const item of itens) {
+        try {
+          await ataService.consultarProtocolo(item.id);
+          sucessos++;
+        } catch {
+          erros++;
+        }
+      }
+      toast.dismiss('batch-consultar-atas');
+      clearSelection();
+      toast.success(`${sucessos} protocolo(s) consultado(s) com sucesso! ${erros > 0 ? `(${erros} falha(s))` : ''}`);
+      carregarAtas();
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
+  const getStatusBadge = (ata: AtaRegistroPreco) => {
+    if (ata.status === 'draft') {
+      return <Badge bg="secondary">Rascunho Local</Badge>;
+    }
+    if (ata.status === 'error') {
+      return (
+        <Badge bg="danger" className="d-inline-flex align-items-center gap-1">
+          <AlertTriangle size={12} /> Falha no Envio
+        </Badge>
+      );
+    }
+    const isRejected = (ata.status_protocolo || '').toLowerCase().includes('rejeitado');
+    const isArmazenado = (ata.status_protocolo || '').toLowerCase().includes('armazenado');
+
+    return (
+      <Badge
+        bg={isRejected ? 'danger' : isArmazenado ? 'success' : 'primary'}
+        className="d-inline-flex align-items-center gap-1"
+      >
+        {isRejected ? <AlertTriangle size={12} /> : isArmazenado ? <CheckCircle2 size={12} /> : <CheckCircle2 size={12} />}
+        {ata.status_protocolo || 'Transmitida'}
+      </Badge>
+    );
+  };
+
+  const columns: ColumnDef<AtaRegistroPreco, any>[] = useMemo(() => [
+    {
+      id: 'select',
+      header: ({ table }) => (
+        <Form.Check
+          type="checkbox"
+          checked={table.getIsAllPageRowsSelected()}
+          onChange={table.getToggleAllPageRowsSelectedHandler()}
+          aria-label="Selecionar todos"
+        />
+      ),
+      cell: ({ row }) => (
+        <Form.Check
+          type="checkbox"
+          checked={row.getIsSelected()}
+          onChange={row.getToggleSelectedHandler()}
+          aria-label="Selecionar linha"
+        />
+      ),
+      size: 40,
+      enableSorting: false,
+    },
+    {
+      accessorKey: 'numero_ata_registro_preco',
+      header: 'Nº Ata / Ano',
+      cell: ({ row }) => {
+        const ata = row.original;
+        return (
+          <div>
+            <span className="fw-bold text-dark d-block">
+              {ata.numero_ata_registro_preco}/{ata.ano_ata}
+            </span>
+            <small className="text-muted font-monospace">{ata.codigo_ata}</small>
+          </div>
+        );
+      },
+    },
+    {
+      accessorKey: 'codigo_edital',
+      header: 'Edital de Origem',
+      cell: ({ row }) => {
+        const ata = row.original;
+        return (
+          <div>
+            <Badge bg="light" text="dark" className="border">
+              {ata.codigo_edital}
+            </Badge>
+            <div className="text-muted small">Ano compra: {ata.ano_compra}</div>
+          </div>
+        );
+      },
+    },
+    {
+      id: 'vigencia',
+      header: 'Vigência',
+      cell: ({ row }) => {
+        const ata = row.original;
+        return (
+          <span className="small text-muted d-block">
+            <Calendar size={13} className="me-1 inline" />
+            {formatDateBR(ata.data_vigencia_inicio)} até {formatDateBR(ata.data_vigencia_fim)}
+          </span>
+        );
+      },
+    },
+    {
+      accessorKey: 'data_assinatura',
+      header: 'Assinatura',
+      cell: ({ row }) => formatDateBR(row.original.data_assinatura),
+    },
+    {
+      id: 'status',
+      header: 'Situação / Protocolo',
+      cell: ({ row }) => {
+        const ata = row.original;
+        return (
+          <div>
+            {getStatusBadge(ata)}
+            {ata.protocolo && (
+              <span className="d-block small font-monospace text-muted mt-1">
+                Prot: {ata.protocolo}
+              </span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      accessorKey: 'updated_at',
+      header: 'Atualizado em',
+      cell: ({ row }) => formatDateBR(row.original.updated_at),
+    },
+    {
+      id: 'acoes',
+      header: 'Ações',
+      enableSorting: false,
+      cell: ({ row }) => {
+        const ata = row.original;
+        const isLoading = actionLoadingId === ata.id;
+
+        return (
+          <ButtonGroup size="sm">
+            {tab === 'draft' ? (
+              <>
+                <Button
+                  variant="outline-primary"
+                  onClick={() => navigate(`/atas/${ata.id}`)}
+                  disabled={isLoading}
+                  title="Editar rascunho"
+                >
+                  <Edit size={14} />
+                </Button>
+                <Button
+                  variant="success"
+                  onClick={() => handleEnviar(ata.id, ata.numero_ata_registro_preco)}
+                  disabled={isLoading}
+                  title="Transmitir para o AUDESP"
+                >
+                  <Send size={14} />
+                </Button>
+                <Button
+                  variant="outline-danger"
+                  onClick={() => handleExcluir(ata.id, ata.numero_ata_registro_preco)}
+                  disabled={isLoading}
+                  title="Excluir rascunho"
+                >
+                  <Trash2 size={14} />
+                </Button>
+              </>
+            ) : (
+              <>
+                {ata.protocolo && (
+                  <>
+                    <Button
+                      variant="outline-info"
+                      onClick={() => handleConsultarProtocolo(ata.id)}
+                      disabled={isLoading}
+                      title="Consultar status no TCESP"
+                    >
+                      <RefreshCw size={14} className={isLoading ? 'spin' : ''} />
+                    </Button>
+                    <Button
+                      variant="outline-secondary"
+                      onClick={() => handleVerHistoricoProtocolo(ata)}
+                      disabled={isLoading}
+                      title="Ver histórico de consultas de protocolo"
+                    >
+                      <History size={14} />
+                    </Button>
+                  </>
+                )}
+                <Button
+                  variant="outline-warning"
+                  onClick={() => handleRetornarRascunho(ata.id)}
+                  disabled={isLoading}
+                  title="Reabrir para rascunho"
+                >
+                  <RotateCcw size={14} />
+                </Button>
+              </>
+            )}
+          </ButtonGroup>
+        );
+      },
+    },
+  ], [tab, actionLoadingId]);
+
   return (
     <Container fluid className="p-0">
       <PageHeader
@@ -210,7 +479,7 @@ export const AtasList: React.FC = () => {
 
         {/* Busca com Form e InputGroup */}
         <Form onSubmit={handleSearchSubmit} className="d-flex align-items-center gap-2">
-          <InputGroup size="sm" style={{ width: '340px' }}>
+          <InputGroup size="sm" style={{ width: '320px' }}>
             <InputGroup.Text className="bg-white border-end-0">
               <Search size={16} className="text-muted" />
             </InputGroup.Text>
@@ -235,31 +504,52 @@ export const AtasList: React.FC = () => {
           </InputGroup>
 
           <Button
-            variant="light"
             size="sm"
+            variant="outline-secondary"
             onClick={carregarAtas}
-            className="border shadow-sm text-secondary p-2"
+            className="d-flex align-items-center gap-1"
             title="Atualizar lista"
           >
-            <RefreshCw size={16} />
+            <RefreshCw size={14} className={loading ? 'spin' : ''} />
           </Button>
+
+          {/* Toggle de Visualização: Tabela vs Cards */}
+          <ButtonGroup size="sm" className="shadow-sm">
+            <Button
+              variant={viewMode === 'table' ? 'success' : 'outline-secondary'}
+              onClick={() => setViewMode('table')}
+              title="Visualização em Tabela (DataTable)"
+              className="d-flex align-items-center gap-1"
+            >
+              <TableIcon size={14} /> Tabela
+            </Button>
+            <Button
+              variant={viewMode === 'cards' ? 'success' : 'outline-secondary'}
+              onClick={() => setViewMode('cards')}
+              title="Visualização em Cards"
+              className="d-flex align-items-center gap-1"
+            >
+              <LayoutGrid size={14} /> Cards
+            </Button>
+          </ButtonGroup>
         </Form>
       </div>
 
-      {/* Tabela com React-Bootstrap */}
-      <CardBox>
-        {loading ? (
-          <div className="text-center py-5 text-muted">
-            <Spinner animation="border" size="sm" className="me-2" />
-            Carregando atas...
-          </div>
-        ) : atas.length === 0 ? (
-          <div className="text-center py-5 text-muted">
-            <Layers size={48} className="mb-3 opacity-25" />
+      {loading ? (
+        <Card className="border-0 shadow-sm text-center py-5">
+          <Card.Body>
+            <Spinner animation="border" variant="success" />
+            <p className="text-muted mt-2 mb-0">Carregando atas...</p>
+          </Card.Body>
+        </Card>
+      ) : atas.length === 0 ? (
+        <Card className="border-0 shadow-sm text-center py-5">
+          <Card.Body>
+            <Layers size={48} className="text-muted opacity-50 mb-3" />
             <h5 className="text-secondary fw-semibold">
               {search ? 'Nenhuma ata encontrada para o filtro' : tab === 'draft' ? 'Nenhum rascunho de ata de registro' : 'Nenhuma ata enviada ao AUDESP'}
             </h5>
-            <p className="text-muted small mb-3">
+            <p className="text-muted small">
               {tab === 'draft'
                 ? 'Clique no botão "+ Nova Ata de Registro" acima para vincular itens de um edital ou cadastrar uma ARP.'
                 : 'As atas transmitidas com sucesso para a API do AUDESP aparecerão nesta aba.'}
@@ -269,13 +559,52 @@ export const AtasList: React.FC = () => {
                 variant="success"
                 size="sm"
                 onClick={() => navigate('/atas/novo')}
-                className="mt-1"
+                className="mt-2"
               >
                 Cadastrar Primeira Ata
               </Button>
             )}
-          </div>
-        ) : (
+          </Card.Body>
+        </Card>
+      ) : viewMode === 'table' ? (
+        <DataTable<AtaRegistroPreco>
+          columns={columns}
+          data={atas}
+          title={`Atas de Registro de Preços (${tab === 'draft' ? 'Rascunhos' : 'Enviadas'})`}
+          enableSelection={true}
+          getRowId={(row) => String(row.id)}
+          renderBatchActions={(selected, clearSelection) => (
+            <>
+              {tab === 'draft' ? (
+                <Button
+                  variant="outline-danger"
+                  size="sm"
+                  disabled={batchLoading}
+                  onClick={() => handleExcluirColetivo(selected, clearSelection)}
+                  className="d-flex align-items-center gap-1"
+                  title="Excluir rascunhos selecionados"
+                >
+                  <Trash2 size={14} />
+                  <span>Excluir Selecionados ({selected.length})</span>
+                </Button>
+              ) : (
+                <Button
+                  variant="outline-info"
+                  size="sm"
+                  disabled={batchLoading}
+                  onClick={() => handleConsultarProtocoloColetivo(selected, clearSelection)}
+                  className="d-flex align-items-center gap-1"
+                  title="Consultar protocolo das atas selecionadas no TCESP"
+                >
+                  <RefreshCw size={14} className={batchLoading ? 'spin' : ''} />
+                  <span>Consultar Protocolos ({selected.length})</span>
+                </Button>
+              )}
+            </>
+          )}
+        />
+      ) : (
+        <CardBox>
           <Table responsive hover className="align-middle mb-0">
             <thead className="table-light">
               <tr>
@@ -318,36 +647,11 @@ export const AtasList: React.FC = () => {
                         <span className="small">{formatDateBR(ata.data_assinatura)}</span>
                       </td>
                       <td>
-                        {ata.status === 'draft' && (
-                          <Badge bg="secondary">Rascunho</Badge>
-                        )}
-                        {ata.status === 'sent' && (
-                          <div>
-                            <Badge
-                              bg={
-                                isRejected
-                                  ? 'danger'
-                                  : (ata.status_protocolo || '').toLowerCase().includes('armazenado')
-                                  ? 'success'
-                                  : 'primary'
-                              }
-                              className="d-inline-flex align-items-center gap-1"
-                            >
-                              {isRejected ? <AlertTriangle size={12} /> : <CheckCircle2 size={12} />}
-                              {ata.status_protocolo || 'Transmitida'}
-                            </Badge>
-                            {ata.protocolo && (
-                              <span className="d-block small font-monospace text-muted mt-1">
-                                Prot: {ata.protocolo}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                        {ata.status === 'error' && (
-                          <Badge bg="danger" className="d-inline-flex align-items-center gap-1">
-                            <AlertTriangle size={12} />
-                            Falha no Envio
-                          </Badge>
+                        {getStatusBadge(ata)}
+                        {ata.protocolo && (
+                          <span className="d-block small font-monospace text-muted mt-1">
+                            Prot: {ata.protocolo}
+                          </span>
                         )}
                       </td>
                       <td className="text-end">
@@ -369,6 +673,14 @@ export const AtasList: React.FC = () => {
                                 title="Transmitir para o AUDESP"
                               >
                                 <Send size={14} className="me-1" /> Transmitir
+                              </Button>
+                              <Button
+                                variant="outline-danger"
+                                onClick={() => handleExcluir(ata.id, ata.numero_ata_registro_preco)}
+                                disabled={actionLoadingId === ata.id}
+                                title="Excluir rascunho"
+                              >
+                                <Trash2 size={14} />
                               </Button>
                             </>
                           ) : (
@@ -422,8 +734,8 @@ export const AtasList: React.FC = () => {
               })}
             </tbody>
           </Table>
-        )}
-      </CardBox>
+        </CardBox>
+      )}
 
       <HistoricoProtocoloModal
         show={showHistoricoModal}

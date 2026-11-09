@@ -25,6 +25,11 @@ export const ataService = {
     return response.data;
   },
 
+  async deleteAta(id: number): Promise<{ sucesso: boolean; mensagem: string }> {
+    const response = await api.delete<{ sucesso: boolean; mensagem: string }>(`/api/atas/${id}`);
+    return response.data;
+  },
+
   async enviarAta(id: number, forcar: boolean = false): Promise<any> {
     const response = await api.post(`/api/atas/${id}/enviar?forcar=${forcar}`);
     return response.data;

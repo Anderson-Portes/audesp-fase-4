@@ -367,6 +367,18 @@ class AtaService:
         return listar_historico_protocolo(session, "ata", ata.id, ata.protocolo)
 
     @staticmethod
+    def excluir_ata(session: Session, ata_id: int) -> Dict[str, Any]:
+        """Exclui uma ata (apenas rascunhos)."""
+        ata = session.get(AtaRegistroPreco, ata_id)
+        if not ata:
+            raise HTTPException(status_code=404, detail="Ata não encontrada.")
+        if ata.status == "sent":
+            raise HTTPException(status_code=400, detail="Não é possível excluir uma ata já transmitida ao AUDESP.")
+        session.delete(ata)
+        session.commit()
+        return {"sucesso": True, "mensagem": "Ata excluída com sucesso."}
+
+    @staticmethod
     def retornar_rascunho(session: Session, ata_id: int) -> AtaRegistroPreco:
         """Permite destravar uma ata enviada/com erro para edição."""
         ata = session.get(AtaRegistroPreco, ata_id)
