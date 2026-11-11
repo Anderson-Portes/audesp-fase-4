@@ -537,7 +537,8 @@ export const AjusteForm: React.FC = () => {
     if (dataVigenciaFim) {
       documentoJSON.dataVigenciaFim = dataVigenciaFim;
     }
-    if (vigenciaMeses) {
+    // Regra RN012_AJUSTE do AUDESP: vigenciaMeses só deve ser enviada se não houver dataVigenciaInicio
+    if (vigenciaMeses && !dataVigenciaInicio) {
       documentoJSON.vigenciaMeses = Number(vigenciaMeses);
     }
     if (numeroParcelas) {
@@ -1491,14 +1492,22 @@ export const AjusteForm: React.FC = () => {
 
               <Col md={12}>
                 <Form.Group>
-                  <Form.Label className="small text-muted">Validade em Meses (caso sem data inicial):</Form.Label>
+                  <Form.Label className="small text-muted">
+                    Validade em Meses (preencher <strong>somente se não houver</strong> data de início da vigência):
+                  </Form.Label>
                   <Form.Control
                     size="sm"
                     type="number"
-                    placeholder="Ex: 12"
-                    value={vigenciaMeses}
+                    placeholder="Ex: 12 (desabilitado se houver data de início)"
+                    value={dataVigenciaInicio ? '' : vigenciaMeses}
+                    disabled={Boolean(dataVigenciaInicio)}
                     onChange={(e) => setVigenciaMeses(e.target.value ? Number(e.target.value) : '')}
                   />
+                  {dataVigenciaInicio && (
+                    <Form.Text className="text-muted d-block small">
+                      Como a data de início da vigência está definida, o campo de meses foi desabilitado para atender à regra RN012 do AUDESP (exclusão mútua).
+                    </Form.Text>
+                  )}
                 </Form.Group>
               </Col>
             </Row>

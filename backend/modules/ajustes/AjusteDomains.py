@@ -203,6 +203,8 @@ def validar_regras_negocio_ajuste(
     if tipo_contrato in TIPOS_CONTRATO_COM_VIGENCIA:
         if not dt_inicio and (vig_meses is None or vig_meses <= 0):
             erros.append("Para o tipo de contrato informado, forneça a 'dataVigenciaInicio' ou a 'vigenciaMeses'.")
+        if dt_inicio and vig_meses:
+            erros.append("Informe ou a 'dataVigenciaInicio' (com 'dataVigenciaFim') ou a 'vigenciaMeses', nunca ambos juntos (Regra RN012_AJUSTE do AUDESP).")
         if dt_inicio and not dt_fim:
             erros.append("Quando 'dataVigenciaInicio' for informada, 'dataVigenciaFim' também é obrigatória.")
 

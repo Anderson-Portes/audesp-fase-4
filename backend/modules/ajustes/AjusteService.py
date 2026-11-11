@@ -284,11 +284,15 @@ class AjusteService:
                 detail={"mensagem": "O ajuste possui inconsistências com o schema AUDESP.", "erros": erros_validacao}
             )
 
-        # Remove campos de vigência com string vazia antes de serializar/enviar
+        # Remove campos de vigência com string vazia antes de serializar/enviar.
+        # Regra RN012_AJUSTE: Se dataVigenciaInicio estiver preenchida, vigenciaMeses não deve ser enviada.
         payload_ajuste = dict(documento)
         for campo_data in ["dataVigenciaInicio", "dataVigenciaFim"]:
             if campo_data in payload_ajuste and not payload_ajuste[campo_data]:
                 del payload_ajuste[campo_data]
+
+        if payload_ajuste.get("dataVigenciaInicio") and "vigenciaMeses" in payload_ajuste:
+            del payload_ajuste["vigenciaMeses"]
 
         resultado = enviar_ajuste_audesp(
             token=token_audesp,
