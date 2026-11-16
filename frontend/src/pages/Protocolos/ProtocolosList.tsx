@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-import { PageHeader } from '../../components/PageHeader/PageHeader';
+import { PageHeader } from '../../components/PageHeader';
 import {
   ProtocoloErrosAlert,
   HistoricoProtocoloModal,

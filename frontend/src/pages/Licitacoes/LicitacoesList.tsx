@@ -32,8 +32,8 @@ import {
 import type { ColumnDef } from '@tanstack/react-table';
 import toast from 'react-hot-toast';
 
-import { PageHeader } from '../../components/PageHeader/PageHeader';
-import { DataTable } from '../../components/DataTable/DataTable';
+import { PageHeader } from '../../components/PageHeader';
+import { DataTable } from '../../components/DataTable';
 import {
   ProtocoloErrosAlert,
   HistoricoProtocoloModal,

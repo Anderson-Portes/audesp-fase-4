@@ -29,8 +29,8 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-import { PageHeader } from '../../components/PageHeader/PageHeader';
-import { CardBox } from '../../components/CardBox/CardBox';
+import { PageHeader } from '../../components/PageHeader';
+import { CardBox } from '../../components/CardBox';
 import {
   ProtocoloErrosAlert,
   HistoricoProtocoloModal,
@@ -40,7 +40,7 @@ import {
   MunicipioEntidadeSelect,
   getSavedMunicipio,
   getSavedEntidade
-} from '../../components/MunicipioEntidadeSelect/MunicipioEntidadeSelect';
+} from '../../components/MunicipioEntidadeSelect';
 import { ajusteService } from '../../services/ajusteService';
 import { editalService } from '../../services/editalService';
 import { licitacaoService } from '../../services/licitacaoService';

@@ -1,8 +1,8 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileText, Award, Layers, FileCheck, Search, ShieldCheck } from 'lucide-react';
-import { PageHeader } from '../../components/PageHeader/PageHeader';
-import { CardBox } from '../../components/CardBox/CardBox';
+import { PageHeader } from '../../components/PageHeader';
+import { CardBox } from '../../components/CardBox';
 
 export const Home: React.FC = () => {
   const navigate = useNavigate();

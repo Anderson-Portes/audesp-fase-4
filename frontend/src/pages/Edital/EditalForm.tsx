@@ -18,8 +18,8 @@ import {
 import toast from 'react-hot-toast';
 import { Container, Form } from 'react-bootstrap';
 
-import { PageHeader } from '../../components/PageHeader/PageHeader';
-import { CardBox as Card } from '../../components/CardBox/CardBox';
+import { PageHeader } from '../../components/PageHeader';
+import { CardBox as Card } from '../../components/CardBox';
 import {
   ProtocoloErrosAlert,
   HistoricoProtocoloModal,
@@ -29,7 +29,7 @@ import {
   MunicipioEntidadeSelect,
   getSavedMunicipio,
   getSavedEntidade
-} from '../../components/MunicipioEntidadeSelect/MunicipioEntidadeSelect';
+} from '../../components/MunicipioEntidadeSelect';
 import { editalService } from '../../services/editalService';
 import type {
   Edital,

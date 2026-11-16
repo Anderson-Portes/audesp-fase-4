@@ -4,7 +4,7 @@ import { Toaster } from 'react-hot-toast';
 
 import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
-import { Home } from './pages/Home/Home';
+import { Home } from './pages/Home';
 import { Login } from './pages/Auth/Login';
 import { EditaisList } from './pages/Edital/EditaisList';
 import { EditalForm } from './pages/Edital/EditalForm';
