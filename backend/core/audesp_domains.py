@@ -68,7 +68,7 @@ ENTIDADES_AUDESP: List[Dict[str, Any]] = [
         "cnpj": "03.012.345/0001-90"
     },
     {
-        "codigo": 6,
+        "codigo": 11309,
         "municipio": 7071,
         "nome": "COHAB Santista - Companhia de Habitação da Baixada Santista",
         "tipo": "Sociedade de Economia Mista",

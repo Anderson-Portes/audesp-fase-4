@@ -66,3 +66,34 @@ export const formatPncpMask = (val: string): string => {
 export const stripMask = (val: string): string => {
   return val.replace(/\D/g, '');
 };
+
+/**
+ * Normaliza identificação de pessoa:
+ * - PJ: dígitos e letras maiúsculas (suporta CNPJ numérico e alfanumérico)
+ * - PF: somente dígitos
+ * - PE: preserva caracteres externos com trim
+ */
+export const normalizarNiPessoa = (tipoPessoa: string, val: string): string => {
+  const tipo = (tipoPessoa || '').trim().toUpperCase();
+  if (tipo === 'PJ') {
+    return (val || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  }
+  if (tipo === 'PF') {
+    return (val || '').replace(/\D/g, '');
+  }
+  return (val || '').trim();
+};
+
+/**
+ * Formata CPF (11 dígitos) ou CNPJ numérico/alfanumérico (14 caracteres).
+ */
+export const formatCpfCnpj = (val: string): string => {
+  const ni = (val || '').replace(/[\s./-]/g, '').toUpperCase();
+  if (/^\d{11}$/.test(ni)) {
+    return `${ni.slice(0, 3)}.${ni.slice(3, 6)}.${ni.slice(6, 9)}-${ni.slice(9, 11)}`;
+  }
+  if (/^[A-Z0-9]{12}\d{2}$/.test(ni)) {
+    return `${ni.slice(0, 2)}.${ni.slice(2, 5)}.${ni.slice(5, 8)}/${ni.slice(8, 12)}-${ni.slice(12, 14)}`;
+  }
+  return val;
+};

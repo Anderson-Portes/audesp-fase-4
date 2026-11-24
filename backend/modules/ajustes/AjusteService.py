@@ -22,6 +22,8 @@ from modules.ajustes.AjusteDomains import (
     DOMINIO_CATEGORIA_PROCESSO,
     DOMINIO_TIPO_OBJETO_CONTRATO,
     OBJETOS_POR_CATEGORIA,
+    obter_vigencia_inicio,
+    preparar_documento_ajuste_envio,
     validar_regras_negocio_ajuste
 )
 from modules.licitacoes.Licitacao import Licitacao
@@ -29,6 +31,7 @@ from modules.editais.Edital import Edital
 from modules.atas.Ata import AtaRegistroPreco
 from modules.licitacoes.LicitacaoDomains import (
     DOMINIO_FONTES_RECURSO,
+    normalizar_ni_pessoa,
     selecionar_licitacao_enviada,
     extrair_numeros_itens_licitacao,
 )
@@ -105,9 +108,18 @@ class AjusteService:
     @staticmethod
     def salvar_ajuste(session: Session, payload: Dict[str, Any]) -> AjusteContrato:
         """Cria ou atualiza um rascunho de ajuste/contrato."""
-        documento = payload.get("documento", {})
+        documento = dict(payload.get("documento", {}))
         descritor = documento.get("descritor", {})
-        
+
+        tipo_forn = str(documento.get("tipoPessoaFornecedor", "PJ") or "PJ")
+        if documento.get("niFornecedor") is not None:
+            documento["niFornecedor"] = normalizar_ni_pessoa(tipo_forn, documento.get("niFornecedor"))
+        if documento.get("niFornecedorSubContratado") is not None:
+            tipo_sub = str(documento.get("tipoPessoaFornecedorSubContratado", "PJ") or "PJ")
+            documento["niFornecedorSubContratado"] = normalizar_ni_pessoa(
+                tipo_sub, documento.get("niFornecedorSubContratado")
+            )
+
         ajuste_id = payload.get("id")
         ajuste = session.get(AjusteContrato, ajuste_id) if ajuste_id else None
 
@@ -122,7 +134,7 @@ class AjusteService:
                 return None
 
         dt_assinatura = parse_date(documento.get("dataAssinatura")) or datetime.now(timezone.utc).date()
-        dt_inicio = parse_date(documento.get("dataVigenciaInicio"))
+        dt_inicio = parse_date(obter_vigencia_inicio(documento))
         dt_fim = parse_date(documento.get("dataVigenciaFim"))
 
         numero_contrato = str(documento.get("numeroContratoEmpenho", ""))
@@ -284,15 +296,7 @@ class AjusteService:
                 detail={"mensagem": "O ajuste possui inconsistências com o schema AUDESP.", "erros": erros_validacao}
             )
 
-        # Remove campos de vigência com string vazia antes de serializar/enviar.
-        # Regra RN012_AJUSTE: Se dataVigenciaInicio estiver preenchida, vigenciaMeses não deve ser enviada.
-        payload_ajuste = dict(documento)
-        for campo_data in ["dataVigenciaInicio", "dataVigenciaFim"]:
-            if campo_data in payload_ajuste and not payload_ajuste[campo_data]:
-                del payload_ajuste[campo_data]
-
-        if payload_ajuste.get("dataVigenciaInicio") and "vigenciaMeses" in payload_ajuste:
-            del payload_ajuste["vigenciaMeses"]
+        payload_ajuste = preparar_documento_ajuste_envio(documento)
 
         resultado = enviar_ajuste_audesp(
             token=token_audesp,

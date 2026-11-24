@@ -50,7 +50,7 @@ import type { AtaRegistroPreco } from '../../types/ata';
 import type { ReferenciaEditalResponse, FornecedorVencedorLicitacao } from '../../types/licitacao';
 import type { DominiosAjusteResponse } from '../../types/ajuste';
 import type { HistoricoProtocoloItem } from '../../utils/protocoloFormatter';
-import { formatBRL, stripMask } from '../../utils/formatters';
+import { formatBRL, normalizarNiPessoa, stripMask } from '../../utils/formatters';
 
 export const AjusteForm: React.FC = () => {
   const navigate = useNavigate();
@@ -233,7 +233,12 @@ export const AjusteForm: React.FC = () => {
           setValorParcela(documento.valorParcela || 0);
 
           setDataAssinatura(ajuste.data_assinatura ? String(ajuste.data_assinatura).split('T')[0] : '');
-          setDataVigenciaInicio(ajuste.data_vigencia_inicio ? String(ajuste.data_vigencia_inicio).split('T')[0] : '');
+          const vigenciaInicioDoc = documento.datavigenciaInicio || documento.dataVigenciaInicio || '';
+          setDataVigenciaInicio(
+            ajuste.data_vigencia_inicio
+              ? String(ajuste.data_vigencia_inicio).split('T')[0]
+              : String(vigenciaInicioDoc).split('T')[0]
+          );
           setDataVigenciaFim(ajuste.data_vigencia_fim ? String(ajuste.data_vigencia_fim).split('T')[0] : '');
           setVigenciaMeses(documento.vigenciaMeses || '');
 
@@ -433,9 +438,9 @@ export const AjusteForm: React.FC = () => {
           return;
         }
       } else {
-        const cnpjGer = stripMask(cnpjGerenciadora);
+        const cnpjGer = normalizarNiPessoa('PJ', cnpjGerenciadora);
         if (cnpjGer.length !== 14) {
-          toast.error('Na adesão a entidade não jurisdicionada ao TCE-SP, informe o CNPJ da Entidade Gerenciadora com 14 dígitos.');
+          toast.error('Na adesão a entidade não jurisdicionada ao TCE-SP, informe o CNPJ da Entidade Gerenciadora com 14 caracteres.');
           return;
         }
       }
@@ -494,7 +499,7 @@ export const AjusteForm: React.FC = () => {
         if (municipioGerenciador) descritor.municipioGerenciador = Number(municipioGerenciador);
         if (entidadeGerenciadora) descritor.entidadeGerenciadora = Number(entidadeGerenciadora);
       } else {
-        const cnpjGer = stripMask(cnpjGerenciadora);
+        const cnpjGer = normalizarNiPessoa('PJ', cnpjGerenciadora);
         if (cnpjGer) descritor.cnpjGerenciadora = cnpjGer;
       }
     }
@@ -502,8 +507,7 @@ export const AjusteForm: React.FC = () => {
       descritor.codigoAta = adesaoParticipacao ? stripMask(codigoAta) : codigoAta.trim();
     }
 
-    const niFornecedorNormalizado =
-      tipoPessoaFornecedor === 'PE' ? niFornecedor.trim() : stripMask(niFornecedor);
+    const niFornecedorNormalizado = normalizarNiPessoa(tipoPessoaFornecedor, niFornecedor);
 
     const documentoJSON: any = {
       descritor,
@@ -546,7 +550,7 @@ export const AjusteForm: React.FC = () => {
       documentoJSON.valorParcela = valorParcela ? Number(valorParcela) : Number((valorInicial / numeroParcelas).toFixed(4));
     }
     if (hasSubcontratado && niSub && nomeSub) {
-      documentoJSON.niFornecedorSubContratado = niSub.trim();
+      documentoJSON.niFornecedorSubContratado = normalizarNiPessoa(tipoPessoaSub, niSub);
       documentoJSON.tipoPessoaFornecedorSubContratado = tipoPessoaSub;
       documentoJSON.nomeRazaoSocialFornecedorSubContratado = nomeSub.trim();
     }

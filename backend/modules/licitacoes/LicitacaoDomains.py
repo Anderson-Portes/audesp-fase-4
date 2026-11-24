@@ -117,9 +117,12 @@ DOMINIO_RESULTADO_HABILITACAO = {
 }
 
 def normalizar_ni_pessoa(tipo_pessoa_id: Any, ni: Any) -> str:
-    """Normaliza CPF/CNPJ e preserva a identificação de pessoa estrangeira."""
+    """Normaliza CPF (dígitos), CNPJ (numérico ou alfanumérico em maiúsculas) e preserva PE."""
     raw = str(ni or "").strip()
-    if str(tipo_pessoa_id or "") in ("PJ", "PF"):
+    tipo = str(tipo_pessoa_id or "").strip().upper()
+    if tipo == "PJ":
+        return re.sub(r"[^A-Za-z0-9]", "", raw).upper()
+    if tipo == "PF":
         return re.sub(r"\D", "", raw)
     return raw
 
@@ -491,12 +494,7 @@ def validar_regras_negocio_licitacao(doc: Dict[str, Any]) -> List[str]:
             vencedores_count = 0
             for l_idx, lic in enumerate(licitantes, start=1):
                 t_pes = lic.get("tipoPessoaId")
-                raw_ni = str(lic.get("niPessoa") or "").strip()
-                # Para PE (Pessoa Estrangeira), preserva caracteres alfanuméricos
-                if t_pes == "PE":
-                    ni = raw_ni
-                else:
-                    ni = re.sub(r"\D", "", raw_ni)
+                ni = normalizar_ni_pessoa(t_pes, lic.get("niPessoa"))
 
                 if t_pes not in ("PJ", "PF", "PE"):
                     erros.append(f"Item {idx}, Licitante {l_idx}: 'tipoPessoaId' deve ser 'PJ', 'PF' ou 'PE'.")
@@ -504,7 +502,7 @@ def validar_regras_negocio_licitacao(doc: Dict[str, Any]) -> List[str]:
                     erros.append(f"Item {idx}, Licitante {l_idx}: 'niPessoa' é obrigatório.")
                 else:
                     if t_pes == "PJ" and len(ni) != 14:
-                        erros.append(f"Item {idx}, Licitante {l_idx}: CNPJ deve ter 14 dígitos.")
+                        erros.append(f"Item {idx}, Licitante {l_idx}: CNPJ deve ter 14 caracteres.")
                     elif t_pes == "PF" and len(ni) != 11:
                         erros.append(f"Item {idx}, Licitante {l_idx}: CPF deve ter 11 dígitos.")
                     elif t_pes == "PE" and len(ni) < 3:

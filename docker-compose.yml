@@ -1,4 +1,44 @@
 services:
+  # ==============================================================================
+  # BANCO DE DADOS MYSQL (OPCIONAL)
+  #
+  # 1) Para usar BANCO PRÓPRIO / SERVIDOR INTERNO (ex: 10.0.20.70):
+  #    - Configure o DB_HOST no .env com o IP/Host do seu servidor.
+  #    - Execute normalmente: docker compose up -d
+  #    (O serviço 'db' NÃO será iniciado).
+  #
+  # 2) Para SUBIR O BANCO NO DOCKER:
+  #    - No .env, configure DB_HOST=db (ou 127.0.0.1 se rodar backend fora do Docker).
+  #    - Execute com o profile 'db': docker compose --profile db up -d
+  #    - Tanto o host quanto o contêiner rodam na mesma porta definida em DB_PORT.
+  # ==============================================================================
+  db:
+    image: mysql:8.0
+    container_name: audesp_db
+    restart: unless-stopped
+    profiles:
+      - db
+    env_file:
+      - ./.env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-bancodesenv}
+      MYSQL_DATABASE: ${DB_DATABASE:-AUDESP_FASE_4}
+    command: >
+      --port=${DB_PORT:-3306}
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max_allowed_packet=64M
+      --default-authentication-plugin=mysql_native_password
+    ports:
+      - "${DB_PORT:-3306}:${DB_PORT:-3306}"
+    volumes:
+      - audesp_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "--port=${DB_PORT:-3306}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
       context: ./backend
@@ -6,21 +46,27 @@ services:
     container_name: audesp_backend
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:${BACKEND_PORT:-8000}"
     env_file:
-      - ./backend/.env
+      - ./.env
     environment:
       - PYTHONUNBUFFERED=1
+      - BACKEND_PORT=${BACKEND_PORT:-8000}
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - VITE_API_URL=http://localhost:8000
+        - VITE_API_URL=${VITE_API_URL:-http://localhost:${BACKEND_PORT:-8000}}
     container_name: audesp_frontend
     restart: unless-stopped
+    environment:
+      - FRONTEND_PORT=${FRONTEND_PORT:-80}
     ports:
-      - "80:80"
+      - "${FRONTEND_PORT:-80}:${FRONTEND_PORT:-80}"
     depends_on:
       - backend
+
+volumes:
+  audesp_mysql_data:

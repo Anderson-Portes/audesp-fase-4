@@ -118,6 +118,38 @@ def categoria_item_normalizada(modalidade_id: Any, atual: Any) -> Any:
     return int(atual) if atual in (1, 2) else None
 
 
+def valor_total_item_edital(item: Dict[str, Any]) -> float:
+    """
+    Calcula o valor total do item como quantidade × valorUnitarioEstimado
+    com precisão de 4 casas decimais do schema AUDESP.
+    """
+    try:
+        quantidade = float(item.get("quantidade") or 0)
+    except (TypeError, ValueError):
+        quantidade = 0.0
+    try:
+        unitario = float(item.get("valorUnitarioEstimado") or 0)
+    except (TypeError, ValueError):
+        unitario = 0.0
+    return round(quantidade * unitario, 4)
+
+
+def recalcular_totais_edital(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Recalcula `valorTotal` de todos os itens em `itensCompra` pela quantidade × unitário."""
+    itens = doc.get("itensCompra")
+    if not isinstance(itens, list):
+        return doc
+    novos_itens = []
+    for item in itens:
+        if not isinstance(item, dict):
+            continue
+        novo_item = dict(item)
+        novo_item["valorTotal"] = valor_total_item_edital(novo_item)
+        novos_itens.append(novo_item)
+    doc["itensCompra"] = novos_itens
+    return doc
+
+
 def normalizar_categorias_edital(doc: Dict[str, Any]) -> Dict[str, Any]:
     """Normaliza o campo itemCategoriaId de cada item de compra segundo a modalidade."""
     modalidade_id = doc.get("modalidadeId")

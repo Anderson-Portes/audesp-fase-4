@@ -4,7 +4,12 @@ from typing import Optional, Dict, Any, List
 import requests
 from dotenv import load_dotenv
 
-load_dotenv()
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT_ENV = os.path.join(ROOT_DIR, ".env")
+if os.path.exists(ROOT_ENV):
+    load_dotenv(ROOT_ENV)
+else:
+    load_dotenv()
 
 def get_audesp_url() -> str:
     """Retorna a URL base configurada para a API do AUDESP"""

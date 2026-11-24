@@ -15,7 +15,11 @@ from typing import Any, Dict, List, Tuple
 
 import openpyxl
 
-from modules.editais.EditalDomains import normalizar_categorias_edital
+from modules.editais.EditalDomains import (
+    normalizar_categorias_edital,
+    valor_total_item_edital,
+)
+from modules.licitacoes.LicitacaoDomains import normalizar_ni_pessoa
 from modules.importacao_exportacao.ImportacaoExportacaoSchemas import (
     EXEMPLO_AJUSTE,
     EXEMPLO_ATA,
@@ -78,10 +82,10 @@ def parsear_planilha_editais(file_bytes: bytes) -> List[Dict[str, Any]]:
             "unidadeMedida": to_str(row.get("unidade_medida"), "UN"),
             "orcamentoSigiloso": to_bool(row.get("orcamento_sigiloso"), False),
             "valorUnitarioEstimado": to_float(row.get("valor_unitario_estimado"), 0.0),
-            "valorTotal": to_float(row.get("valor_total"), 0.0),
             "criterioJulgamentoId": to_int(row.get("criterio_julgamento_id"), 1),
             "itemCategoriaId": to_int(row.get("item_categoria_id"), 3),
         }
+        item_obj["valorTotal"] = valor_total_item_edital(item_obj)
         if to_str(row.get("patrimonio")):
             item_obj["patrimonio"] = to_str(row.get("patrimonio"))
         if to_str(row.get("codigo_registro_imobiliario")):
@@ -187,7 +191,7 @@ def parsear_planilha_licitacoes(file_bytes: bytes) -> List[Dict[str, Any]]:
         if not cod or num_item is None or not ni_raw or _eh_linha_exemplo(cod, to_str(row.get("nome_razao_social"))):
             continue
         tp = to_code_prefix(row.get("tipo_pessoa_id"), "PJ").upper()
-        ni = ni_raw if tp == "PE" else re.sub(r"\D", "", ni_raw)
+        ni = normalizar_ni_pessoa(tp, ni_raw)
         res_hab = to_int(row.get("resultado_habilitacao"), 1)
         prop_obj: Dict[str, Any] = {
             "tipoPessoaId": tp,
@@ -356,7 +360,7 @@ def parsear_planilha_ajustes(file_bytes: bytes) -> List[Dict[str, Any]]:
                 if ent_ger:
                     descritor["entidadeGerenciadora"] = ent_ger
             else:
-                cnpj_ger = re.sub(r"\D", "", to_str(row.get("cnpj_gerenciadora")))
+                cnpj_ger = normalizar_ni_pessoa("PJ", to_str(row.get("cnpj_gerenciadora")))
                 if cnpj_ger:
                     descritor["cnpjGerenciadora"] = cnpj_ger
         if cod_ata:
@@ -364,7 +368,7 @@ def parsear_planilha_ajustes(file_bytes: bytes) -> List[Dict[str, Any]]:
 
         tp_forn = to_code_prefix(row.get("tipo_pessoa_fornecedor"), "PJ").upper()
         ni_raw = to_str(row.get("ni_fornecedor"))
-        ni_forn = ni_raw if tp_forn == "PE" else re.sub(r"\D", "", ni_raw)
+        ni_forn = normalizar_ni_pessoa(tp_forn, ni_raw)
 
         fontes = split_int_list(row.get("fontes_recurso"))
         despesas = split_str_list(row.get("despesas"))

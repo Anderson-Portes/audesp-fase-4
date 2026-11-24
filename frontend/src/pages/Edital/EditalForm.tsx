@@ -261,7 +261,7 @@ export const EditalForm: React.FC = () => {
         unidadeMedida: it.unidadeMedida.trim(),
         orcamentoSigiloso: Boolean(it.orcamentoSigiloso),
         valorUnitarioEstimado: Number(Number(it.valorUnitarioEstimado).toFixed(4)),
-        valorTotal: Number(Number(it.valorTotal).toFixed(4)),
+        valorTotal: Number((Number(it.quantidade || 0) * Number(it.valorUnitarioEstimado || 0)).toFixed(4)),
         criterioJulgamentoId: Number(it.criterioJulgamentoId),
         itemCategoriaId: isLeilao
           ? ([1, 2].includes(Number(it.itemCategoriaId)) ? Number(it.itemCategoriaId) : 2)
@@ -1224,7 +1224,7 @@ export const EditalForm: React.FC = () => {
           <div className="d-flex align-items-center gap-2">
             {itens.length > 0 && (
               <span className="badge bg-success bg-opacity-10 text-success border border-success-subtle px-2 py-1 font-monospace">
-                Total: {formatBRL(itens.reduce((acc, curr) => acc + (curr.valorTotal || 0), 0))}
+                Total: {formatBRL(itens.reduce((acc, curr) => acc + Number((Number(curr.quantidade || 0) * Number(curr.valorUnitarioEstimado || 0)).toFixed(4)), 0))}
               </span>
             )}
             {!isSent && (
@@ -1310,7 +1310,9 @@ export const EditalForm: React.FC = () => {
                     <td className="text-end font-monospace">{formatDecimal4(it.quantidade)}</td>
                     <td>{it.unidadeMedida}</td>
                     <td className="text-end font-monospace">{formatBRL(it.valorUnitarioEstimado)}</td>
-                    <td className="text-end font-monospace fw-bold">{formatBRL(it.valorTotal)}</td>
+                    <td className="text-end font-monospace fw-bold">
+                      {formatBRL(Number((Number(it.quantidade || 0) * Number(it.valorUnitarioEstimado || 0)).toFixed(4)))}
+                    </td>
                     {!isSent && (
                       <td className="text-end">
                         <button
@@ -1336,7 +1338,7 @@ export const EditalForm: React.FC = () => {
                 <tr>
                   <td colSpan={8} className="text-end fw-bold">Total Geral Estimado:</td>
                   <td className="text-end fw-bold text-success font-monospace">
-                    {formatBRL(itens.reduce((acc, curr) => acc + (curr.valorTotal || 0), 0))}
+                    {formatBRL(itens.reduce((acc, curr) => acc + Number((Number(curr.quantidade || 0) * Number(curr.valorUnitarioEstimado || 0)).toFixed(4)), 0))}
                   </td>
                   {!isSent && <td></td>}
                 </tr>

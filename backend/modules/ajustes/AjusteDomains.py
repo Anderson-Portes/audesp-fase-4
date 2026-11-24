@@ -1,5 +1,45 @@
 from typing import Dict, Any, List, Optional, Set
-from modules.licitacoes.LicitacaoDomains import validar_itens_contra_licitacao
+from modules.licitacoes.LicitacaoDomains import (
+    normalizar_ni_pessoa,
+    validar_itens_contra_licitacao,
+)
+
+CAMPO_VIGENCIA_INICIO = "datavigenciaInicio"
+CAMPO_VIGENCIA_INICIO_DOCUMENTADO = "dataVigenciaInicio"
+
+
+def obter_vigencia_inicio(dados: Dict[str, Any]) -> Optional[str]:
+    """
+    Retorna a data de início da vigência aceitando ambas as grafias usadas pelo AUDESP:
+    `datavigenciaInicio` (RN012_AJUSTE) e `dataVigenciaInicio` (schema / RN010_AJUSTE).
+    """
+    inicio = dados.get(CAMPO_VIGENCIA_INICIO) or dados.get(CAMPO_VIGENCIA_INICIO_DOCUMENTADO)
+    if isinstance(inicio, str):
+        limpo = inicio.strip()
+        return limpo or None
+    return None
+
+
+def preparar_documento_ajuste_envio(documento: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Prepara o payload de envio do Ajuste ao AUDESP:
+    - Remove campos de data vazios;
+    - Quando houver data de início de vigência, envia ambas as grafias
+      (`dataVigenciaInicio` e `datavigenciaInicio`) para compatibilidade com RN010/RN012;
+    - Remove `vigenciaMeses` quando houver data de início (exclusão mútua RN012_AJUSTE).
+    """
+    payload = dict(documento)
+    for campo_data in (CAMPO_VIGENCIA_INICIO_DOCUMENTADO, CAMPO_VIGENCIA_INICIO, "dataVigenciaFim"):
+        if campo_data in payload and not str(payload[campo_data] or "").strip():
+            del payload[campo_data]
+
+    inicio = obter_vigencia_inicio(payload)
+    if inicio:
+        payload[CAMPO_VIGENCIA_INICIO_DOCUMENTADO] = inicio
+        payload[CAMPO_VIGENCIA_INICIO] = inicio
+        payload.pop("vigenciaMeses", None)
+
+    return payload
 
 # Domínio PNCP: Tipo de Contrato
 DOMINIO_TIPO_CONTRATO = {
@@ -121,9 +161,9 @@ def validar_regras_negocio_ajuste(
             if not descritor.get("municipioGerenciador") or not descritor.get("entidadeGerenciadora"):
                 erros.append("Na adesão a entidade jurisdicionada ao TCE-SP, informe 'municipioGerenciador' e 'entidadeGerenciadora'.")
         elif ger_jurisd is False:
-            cnpj_ger = "".join(filter(str.isdigit, str(descritor.get("cnpjGerenciadora") or "")))
+            cnpj_ger = normalizar_ni_pessoa("PJ", descritor.get("cnpjGerenciadora"))
             if len(cnpj_ger) != 14:
-                erros.append("Na adesão a entidade não jurisdicionada ao TCE-SP, informe 'cnpjGerenciadora' com 14 dígitos.")
+                erros.append("Na adesão a entidade não jurisdicionada ao TCE-SP, informe 'cnpjGerenciadora' com 14 caracteres.")
     else:
         if cod_ata and len(cod_ata) > 31:
             erros.append("Código da Ata deve ter no máximo 31 caracteres.")
@@ -196,7 +236,7 @@ def validar_regras_negocio_ajuste(
         erros.append("Data de assinatura do contrato é obrigatória.")
         
     # Vigência condicional (Fase IV v04)
-    dt_inicio = dados.get("dataVigenciaInicio")
+    dt_inicio = obter_vigencia_inicio(dados)
     dt_fim = dados.get("dataVigenciaFim")
     vig_meses = dados.get("vigenciaMeses")
 

@@ -32,6 +32,7 @@ from modules.editais.EditalDomains import (
     DOMINIO_ITEM_CATEGORIA,
     DOMINIO_ITEM_CATEGORIA_LEILAO,
     normalizar_categorias_edital,
+    recalcular_totais_edital,
     validar_regras_negocio_edital
 )
 
@@ -183,7 +184,7 @@ class EditalService:
         else:
             doc_dict = dict(documento)
 
-        doc_dict = normalizar_categorias_edital(doc_dict)
+        doc_dict = recalcular_totais_edital(normalizar_categorias_edital(doc_dict))
 
         descritor = doc_dict.get("descritor", {})
         codigo_edital = str(descritor.get("codigoEdital") or payload.get("codigo_edital") or "").strip()
@@ -233,7 +234,7 @@ class EditalService:
         else:
             doc_dict = dict(documento)
 
-        doc_dict = normalizar_categorias_edital(doc_dict)
+        doc_dict = recalcular_totais_edital(normalizar_categorias_edital(doc_dict))
 
         descritor = doc_dict.get("descritor", {})
         if descritor.get("codigoEdital"):
@@ -375,7 +376,7 @@ class EditalService:
         if "criterioJulgamentoId" in doc:
             del doc["criterioJulgamentoId"]
 
-        doc = normalizar_categorias_edital(doc)
+        doc = recalcular_totais_edital(normalizar_categorias_edital(doc))
 
         # Bloqueia envio se sem_pncp estiver ativo mas houver publicação PNCP (veículo 5)
         if edital.sem_pncp:

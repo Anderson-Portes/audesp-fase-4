@@ -1,11 +1,18 @@
 import os
+import time
+import logging
 from typing import Generator
 from urllib.parse import quote_plus
 from dotenv import load_dotenv
 from sqlmodel import create_engine, SQLModel, Session
 
-# Carrega as variáveis de ambiente do arquivo .env
-load_dotenv()
+# Carrega as variáveis de ambiente do .env na raiz do projeto (ou no diretório atual)
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT_ENV = os.path.join(ROOT_DIR, ".env")
+if os.path.exists(ROOT_ENV):
+    load_dotenv(ROOT_ENV)
+else:
+    load_dotenv()
 
 # Lê as credenciais do .env
 DB_USER = os.getenv("DB_USERNAME") or os.getenv("DB_USER")
@@ -21,9 +28,20 @@ DATABASE_URL = f"mysql+pymysql://{DB_USER}:{quote_plus(DB_PASSWORD)}@{DB_HOST}:{
 
 engine = create_engine(DATABASE_URL, echo=True)
 
-def create_db_and_tables():
-    """Cria todas as tabelas registradas no SQLModel"""
-    SQLModel.metadata.create_all(engine)
+def create_db_and_tables(max_retries: int = 15, delay_seconds: int = 2):
+    """Cria todas as tabelas registradas no SQLModel, com retentativas caso o banco esteja inicializando."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            SQLModel.metadata.create_all(engine)
+            logging.info(f"✅ Conexão com banco '{DB_NAME}' ({DB_HOST}:{DB_PORT}) estabelecida e tabelas sincronizadas.")
+            return
+        except Exception as e:
+            if attempt < max_retries:
+                logging.warning(f"⏳ Aguardando banco de dados responder em {DB_HOST}:{DB_PORT} (tentativa {attempt}/{max_retries})...")
+                time.sleep(delay_seconds)
+            else:
+                logging.error(f"❌ Falha definitiva ao conectar no banco de dados após {max_retries} tentativas: {e}")
+                raise e
 
 def get_session() -> Generator[Session, None, None]:
     """Dependency do FastAPI para obter sessão do banco"""

@@ -41,8 +41,10 @@ import type { Edital } from '../../types/edital';
 import type { HistoricoProtocoloItem } from '../../utils/protocoloFormatter';
 import { 
   formatBRL, 
-  formatPncpMask, 
-  stripMask 
+  formatCpfCnpj,
+  formatPncpMask,
+  normalizarNiPessoa,
+  stripMask
 } from '../../utils/formatters';
 
 export const LicitacaoForm: React.FC = () => {
@@ -313,7 +315,7 @@ export const LicitacaoForm: React.FC = () => {
         tipoProposta: Number(it.tipoProposta),
         licitantes: (it.licitantes || []).map((lic) => ({
           tipoPessoaId: lic.tipoPessoaId,
-          niPessoa: lic.tipoPessoaId === 'PE' ? lic.niPessoa.trim() : stripMask(lic.niPessoa),
+          niPessoa: normalizarNiPessoa(lic.tipoPessoaId, lic.niPessoa),
           ...(lic.tipoPessoaId === 'PE' && lic.nomeRazaoSocial?.trim() ? { nomeRazaoSocial: lic.nomeRazaoSocial.trim() } : {}),
           declaracaoMEouEPP: Number(lic.declaracaoMEouEPP),
           resultadoHabilitacao: Number(lic.resultadoHabilitacao),
@@ -655,13 +657,13 @@ export const LicitacaoForm: React.FC = () => {
 
   const handleSaveLicitante = () => {
     const isPe = licitanteForm.tipoPessoaId === 'PE';
-    const ni = isPe ? licitanteForm.niPessoa.trim() : stripMask(licitanteForm.niPessoa);
+    const ni = normalizarNiPessoa(licitanteForm.tipoPessoaId, licitanteForm.niPessoa);
     if (!ni) {
       toast.error('Informe o documento de identificação do licitante.');
       return;
     }
     if (licitanteForm.tipoPessoaId === 'PJ' && ni.length !== 14) {
-      toast.error('CNPJ deve ter 14 dígitos.');
+      toast.error('CNPJ deve ter 14 caracteres.');
       return;
     }
     if (licitanteForm.tipoPessoaId === 'PF' && ni.length !== 11) {
@@ -1559,7 +1561,9 @@ export const LicitacaoForm: React.FC = () => {
                               <tr key={lIdx} className={isVencedor ? 'table-success bg-opacity-25' : ''}>
                                 <td>
                                   <div className="fw-medium font-monospace">
-                                    {lic.tipoPessoaId === 'PJ' ? formatPncpMask(lic.niPessoa) : lic.niPessoa}
+                                    {lic.tipoPessoaId === 'PJ' || lic.tipoPessoaId === 'PF'
+                                      ? formatCpfCnpj(lic.niPessoa)
+                                      : lic.niPessoa}
                                   </div>
                                   {lic.nomeRazaoSocial && (
                                     <div className="small text-muted">{lic.nomeRazaoSocial}</div>
